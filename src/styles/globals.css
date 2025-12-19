@@ -1,0 +1,277 @@
+/* Import a distinctive font - must be before @tailwind */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm Dark Theme - Sophisticated & Modern */
+    --background: 225 15% 8%;           /* Deep blue-charcoal */
+    --foreground: 40 20% 96%;           /* Warm cream white */
+
+    --card: 225 14% 11%;                /* Card surface */
+    --card-foreground: 40 20% 96%;
+
+    --popover: 225 16% 12%;
+    --popover-foreground: 40 20% 96%;
+
+    --primary: 32 100% 54%;             /* Warm amber accent */
+    --primary-foreground: 225 15% 8%;
+
+    --secondary: 225 12% 15%;
+    --secondary-foreground: 40 15% 85%;
+
+    --muted: 225 12% 14%;
+    --muted-foreground: 225 8% 52%;
+
+    --accent: 32 100% 54%;
+    --accent-foreground: 225 15% 8%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 69% 45%;
+    --warning: 38 95% 55%;
+
+    --border: 225 12% 17%;
+    --input: 225 12% 17%;
+    --ring: 32 100% 54%;
+
+    --radius: 14px;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Smooth transitions for color changes */
+  *, *::before, *::after {
+    transition-property: background-color, border-color, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Tauri window draggable region */
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /* Better focus styles */
+  :focus-visible {
+    outline: 2px solid hsl(var(--accent));
+    outline-offset: 2px;
+  }
+
+  /* Selection color */
+  ::selection {
+    background: hsl(var(--accent) / 0.3);
+    color: hsl(var(--foreground));
+  }
+
+  /* Form element defaults */
+  input, select, textarea, button {
+    font-family: inherit;
+  }
+}
+
+@layer utilities {
+  /* Subtle glass effect for cards */
+  .glass {
+    @apply bg-card/80 backdrop-blur-xl;
+    border: 1px solid hsl(var(--border) / 0.5);
+  }
+
+  /* Recording pill dark glass */
+  .glass-dark {
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  /* Tabular numbers for timers */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Focus visible ring */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(var(--accent)), hsl(38 100% 70%));
+  }
+
+  /* Glow effects */
+  .glow-accent {
+    box-shadow: 0 0 40px -8px hsl(var(--accent) / 0.35);
+  }
+
+  .glow-sm {
+    box-shadow: 0 0 20px -5px hsl(var(--accent) / 0.25);
+  }
+}
+
+/* Overlay window - transparent background */
+.overlay-window {
+  background: transparent !important;
+}
+
+.overlay-window body {
+  background: transparent !important;
+}
+
+/* Waveform bar animations */
+.wave-bar {
+  @apply bg-destructive rounded-sm transition-transform duration-100;
+  transform-origin: bottom;
+}
+
+.wave-bar.animate {
+  animation: wave 1s ease-in-out infinite;
+}
+
+/* Staggered wave animation delays */
+.wave-bar:nth-child(1) { animation-delay: 0s; }
+.wave-bar:nth-child(2) { animation-delay: 0.1s; }
+.wave-bar:nth-child(3) { animation-delay: 0.2s; }
+.wave-bar:nth-child(4) { animation-delay: 0.15s; }
+.wave-bar:nth-child(5) { animation-delay: 0.25s; }
+.wave-bar:nth-child(6) { animation-delay: 0.05s; }
+.wave-bar:nth-child(7) { animation-delay: 0.18s; }
+.wave-bar:nth-child(8) { animation-delay: 0.08s; }
+.wave-bar:nth-child(9) { animation-delay: 0.22s; }
+.wave-bar:nth-child(10) { animation-delay: 0.12s; }
+.wave-bar:nth-child(11) { animation-delay: 0.28s; }
+.wave-bar:nth-child(12) { animation-delay: 0.03s; }
+
+/* Recording pulse dot */
+@keyframes recording-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.4);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 0 0 8px rgba(255, 59, 48, 0);
+  }
+}
+
+.recording-dot {
+  animation: recording-pulse 1.5s ease-in-out infinite;
+}
+
+/* Keyframe animations */
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Animation utilities */
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.25s ease-out forwards;
+}
+
+/* Custom scrollbar - sleek dark style */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(225 12% 25%);
+}
+
+/* Subtle background texture */
+.bg-texture {
+  position: relative;
+}
+
+.bg-texture::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  opacity: 0.018;
+  pointer-events: none;
+  z-index: 0;
+}

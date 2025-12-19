@@ -1,0 +1,84 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Murmur",
+  "version": "0.1.0",
+  "identifier": "com.idstuart.murmur",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Murmur - Preferences",
+        "width": 400,
+        "height": 500,
+        "visible": false,
+        "skipTaskbar": true,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "resizable": false,
+        "center": true
+      },
+      {
+        "label": "overlay",
+        "title": "",
+        "url": "overlay.html",
+        "width": 500,
+        "height": 80,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "center": true,
+        "focus": false
+      },
+      {
+        "label": "onboarding",
+        "title": "Murmur - Setup",
+        "url": "onboarding.html",
+        "width": 560,
+        "height": 640,
+        "visible": false,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "resizable": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "trayIcon": {
+      "id": "main",
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true,
+      "menuOnLeftClick": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist",
+      "signingIdentity": "Apple Development: anuragduddu@icloud.com (K937NTRLN2)"
+    }
+  }
+}

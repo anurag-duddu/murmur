@@ -229,7 +229,7 @@ impl AppConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Preferences {
     pub recording_mode: String,
     pub hotkey: String,
@@ -237,8 +237,9 @@ pub struct Preferences {
     pub play_sounds: bool,
     pub microphone: String,
     pub language: String,
+    #[serde(rename = "deepgram_api_key")]
     pub deepgram_key: String,
-    #[serde(rename = "claudeKey")]
+    #[serde(rename = "anthropic_api_key")]
     pub anthropic_key: String,
     // New: Transcription provider settings
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -1883,14 +1883,9 @@ pub fn run() {
             // Register global shortcut
             setup_global_shortcuts(app, &initial_hotkey, &initial_mode)?;
 
-            // Initialize workspace index for file tagging (in background to not block startup)
-            {
-                let app_handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    let state: tauri::State<'_, AppState> = app_handle.state();
-                    initialize_workspace_index(&state);
-                });
-            }
+            // NOTE: Workspace indexing disabled - Phase 3 file tagging is incomplete
+            // and doesn't trigger IDE file picker. Re-enable when fixed.
+            // initialize_workspace_index can be called via set_workspace_root command if needed.
 
             // Hide main window on start
             if let Some(window) = app.get_webview_window("main") {

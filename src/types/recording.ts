@@ -3,12 +3,16 @@ export type RecordingState =
   | "recording"
   | "transcribing"
   | "enhancing"
+  | "transforming"
   | "error";
+
+export type DictationMode = "dictation" | "command";
 
 export interface StateChangeEvent {
   state: RecordingState;
   message?: string;
   recording_duration_ms?: number;
+  mode?: DictationMode;
 }
 
 export interface TranscriptionCompleteEvent {
@@ -36,5 +40,5 @@ export const canStopRecording = (state: RecordingState): boolean => {
 };
 
 export const isProcessing = (state: RecordingState): boolean => {
-  return state === "transcribing" || state === "enhancing";
+  return state === "transcribing" || state === "enhancing" || state === "transforming";
 };

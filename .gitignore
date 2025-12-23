@@ -34,3 +34,6 @@ dist-ssr
 # IDE/Tool specific (personal settings)
 .claude/
 .cursor/
+
+# Internal documentation (PRDs, plans - not for public repo)
+docs/

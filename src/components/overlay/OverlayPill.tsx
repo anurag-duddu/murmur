@@ -3,10 +3,11 @@ import { RecordingDot } from "./RecordingDot";
 import { Waveform } from "./Waveform";
 import { Timer } from "./Timer";
 import { X } from "lucide-react";
-import type { RecordingState } from "@/types";
+import type { RecordingState, DictationMode } from "@/types";
 
 interface OverlayPillProps {
   state: RecordingState;
+  mode: DictationMode;
   statusMessage: string;
   audioLevel: number;
   elapsedSeconds: number;
@@ -16,6 +17,7 @@ interface OverlayPillProps {
 
 export function OverlayPill({
   state,
+  mode,
   statusMessage,
   audioLevel,
   elapsedSeconds,
@@ -23,10 +25,12 @@ export function OverlayPill({
   onCancel,
 }: OverlayPillProps) {
   const canStop = state === "recording";
+  const isCommandMode = mode === "command";
 
+  // Determine dot state: use "command" (blue) for Command Mode recording
   const dotState =
-    state === "recording" ? "recording" :
-    state === "transcribing" || state === "enhancing" ? "processing" :
+    state === "recording" ? (isCommandMode ? "command" : "recording") :
+    state === "transcribing" || state === "enhancing" || state === "transforming" ? "processing" :
     state === "idle" && statusMessage === "Done!" ? "done" :
     state === "error" ? "error" : "idle";
 

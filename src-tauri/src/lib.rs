@@ -12,10 +12,14 @@ mod audio;
 mod claude;
 mod config;
 mod deepgram;
+mod groq_llm;
+mod ide;
 mod licensing;
 mod model_manager;
 mod permissions;
+mod platform;
 mod state;
+mod styles;
 mod transcription;
 mod whisper_api;
 mod whisper_local;
@@ -24,7 +28,8 @@ use audio::AudioRecorder;
 use claude::ClaudeClient;
 use config::{AppConfig, TranscriptionProvider};
 use deepgram::DeepgramClient;
-use state::{ErrorEvent, RecordingState, StateChangeEvent, TranscriptionCompleteEvent};
+use groq_llm::{GroqLlmClient, UserIntent};
+use state::{DictationMode, ErrorEvent, RecordingState, StateChangeEvent, TranscriptionCompleteEvent};
 
 /// Application state - single source of truth
 pub struct AppState {
@@ -32,6 +37,16 @@ pub struct AppState {
     config: Mutex<AppConfig>,
     recording_state: Mutex<RecordingState>,
     recording_start: Mutex<Option<Instant>>,
+    /// Current mode: Dictation (default) or Command (when text is selected)
+    dictation_mode: Mutex<DictationMode>,
+    /// Selected text captured at recording start (for Command Mode)
+    selected_text: Mutex<Option<String>>,
+    /// Active app captured at recording start (for context-aware styles)
+    active_style: Mutex<Option<styles::Style>>,
+    /// Bundle ID of active app (for IDE detection)
+    active_bundle_id: Mutex<Option<String>>,
+    /// Workspace file index for file tagging (built on startup)
+    workspace_index: Mutex<Option<ide::file_index::WorkspaceIndex>>,
 }
 
 impl AppState {
@@ -41,6 +56,11 @@ impl AppState {
             config: Mutex::new(config),
             recording_state: Mutex::new(RecordingState::Idle),
             recording_start: Mutex::new(None),
+            dictation_mode: Mutex::new(DictationMode::Dictation),
+            selected_text: Mutex::new(None),
+            active_style: Mutex::new(None),
+            active_bundle_id: Mutex::new(None),
+            workspace_index: Mutex::new(None),
         }
     }
 
@@ -54,6 +74,71 @@ impl AppState {
     fn set_state(&self, new_state: RecordingState) {
         if let Ok(mut state) = self.recording_state.lock() {
             *state = new_state;
+        }
+    }
+
+    fn get_mode(&self) -> DictationMode {
+        self.dictation_mode
+            .lock()
+            .map(|m| *m)
+            .unwrap_or(DictationMode::Dictation)
+    }
+
+    fn set_mode(&self, mode: DictationMode) {
+        if let Ok(mut m) = self.dictation_mode.lock() {
+            *m = mode;
+        }
+    }
+
+    fn get_selected_text(&self) -> Option<String> {
+        self.selected_text
+            .lock()
+            .ok()
+            .and_then(|t| t.clone())
+    }
+
+    fn set_selected_text(&self, text: Option<String>) {
+        if let Ok(mut t) = self.selected_text.lock() {
+            *t = text;
+        }
+    }
+
+    fn get_active_style(&self) -> Option<styles::Style> {
+        self.active_style
+            .lock()
+            .ok()
+            .and_then(|s| s.clone())
+    }
+
+    fn set_active_style(&self, style: Option<styles::Style>) {
+        if let Ok(mut s) = self.active_style.lock() {
+            *s = style;
+        }
+    }
+
+    fn get_active_bundle_id(&self) -> Option<String> {
+        self.active_bundle_id
+            .lock()
+            .ok()
+            .and_then(|b| b.clone())
+    }
+
+    fn set_active_bundle_id(&self, bundle_id: Option<String>) {
+        if let Ok(mut b) = self.active_bundle_id.lock() {
+            *b = bundle_id;
+        }
+    }
+
+    fn get_workspace_index(&self) -> Option<ide::file_index::WorkspaceIndex> {
+        self.workspace_index
+            .lock()
+            .ok()
+            .and_then(|idx| idx.clone())
+    }
+
+    fn set_workspace_index(&self, index: Option<ide::file_index::WorkspaceIndex>) {
+        if let Ok(mut idx) = self.workspace_index.lock() {
+            *idx = index;
         }
     }
 
@@ -71,6 +156,7 @@ fn emit_state_change(app: &AppHandle, state: &AppState, message: Option<String>)
         state: state.get_state(),
         message,
         recording_duration_ms: state.get_recording_duration_ms(),
+        mode: state.get_mode(),
     };
 
     // Emit directly to overlay window (not broadcast) for reliable delivery
@@ -110,6 +196,7 @@ fn get_overlay_state(state: State<'_, AppState>) -> StateChangeEvent {
         state: state.get_state(),
         message: None,
         recording_duration_ms: state.get_recording_duration_ms(),
+        mode: state.get_mode(),
     }
 }
 
@@ -124,26 +211,27 @@ async fn start_recording(app_handle: AppHandle, state: State<'_, AppState>) -> R
         ));
     }
 
-    // Update state FIRST to prevent race conditions
+    // =========================================================================
+    // PHASE 1: INSTANT RESPONSE (no blocking operations)
+    // =========================================================================
+
+    // Set state to Recording immediately (default to Dictation mode)
     state.set_state(RecordingState::Recording);
+    state.set_mode(DictationMode::Dictation); // Default, may update async
     if let Ok(mut start) = state.recording_start.lock() {
         *start = Some(Instant::now());
     }
 
-    // Show overlay window BEFORE emitting state change so it receives the event
-    // IMPORTANT: Don't set_focus() - we want to keep focus on the user's text field
+    // Show overlay IMMEDIATELY - no delay
     if let Some(overlay) = app_handle.get_webview_window("overlay") {
-        // Position overlay at center-bottom with 300px offset from bottom
         position_overlay_center_bottom(&overlay, 300);
         let _ = overlay.show();
     }
 
-    // Small delay to ensure overlay is ready to receive events
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    // Emit initial state (Dictation mode by default)
+    emit_state_change(&app_handle, &state, Some("Recording...".to_string()));
 
-    emit_state_change(&app_handle, &state, Some("Recording started".to_string()));
-
-    // Start audio capture
+    // Start audio capture IMMEDIATELY
     let result = {
         let mut recorder = state
             .recorder
@@ -157,6 +245,44 @@ async fn start_recording(app_handle: AppHandle, state: State<'_, AppState>) -> R
         emit_error(&app_handle, ErrorEvent::no_audio_device());
         return Err(e);
     }
+
+    // =========================================================================
+    // PHASE 2: ASYNC CONTEXT CAPTURE (happens while user speaks)
+    // =========================================================================
+
+    let app_handle_for_context = app_handle.clone();
+    std::thread::spawn(move || {
+        let state: tauri::State<'_, AppState> = app_handle_for_context.state();
+
+        // Only proceed if we're still recording
+        if state.get_state() != RecordingState::Recording {
+            return;
+        }
+
+        // 1. Detect active app for context-aware styles
+        let active_style = styles::get_current_style();
+        state.set_active_style(Some(active_style));
+
+        // 2. Detect selection - if found, switch to Command Mode
+        match platform::selection::get_selected_text() {
+            Ok(text) => {
+                state.set_mode(DictationMode::Command);
+                state.set_selected_text(Some(text));
+
+                // Update overlay to show Command Mode
+                if state.get_state() == RecordingState::Recording {
+                    emit_state_change(
+                        &app_handle_for_context,
+                        &state,
+                        Some("Command Mode".to_string()),
+                    );
+                }
+            }
+            Err(_) => {
+                // Already set to Dictation by default, no change needed
+            }
+        }
+    });
 
     Ok(())
 }
@@ -637,6 +763,145 @@ fn set_transcription_provider(
     Ok(())
 }
 
+// ============================================================================
+// WORKSPACE INDEX COMMANDS
+// ============================================================================
+
+/// Set the workspace root and build the file index
+#[tauri::command]
+fn set_workspace_root(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<WorkspaceIndexStatus, String> {
+    use std::path::Path;
+
+    let workspace_path = Path::new(&path);
+
+    if !workspace_path.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+
+    if !workspace_path.is_dir() {
+        return Err(format!("Path is not a directory: {}", path));
+    }
+
+    println!("[WORKSPACE] Building index for: {}", path);
+
+    match ide::file_index::WorkspaceIndex::build(workspace_path) {
+        Ok(index) => {
+            let file_count = index.file_count();
+            let files_skipped = index.files_skipped;
+            state.set_workspace_index(Some(index));
+            println!("[WORKSPACE] Index built: {} files indexed, {} skipped", file_count, files_skipped);
+            Ok(WorkspaceIndexStatus {
+                indexed: true,
+                root: Some(path),
+                file_count,
+                files_skipped,
+            })
+        }
+        Err(e) => {
+            println!("[WORKSPACE] Failed to build index: {}", e);
+            Err(e)
+        }
+    }
+}
+
+/// Get the current workspace index status
+#[tauri::command]
+fn get_workspace_status(state: State<'_, AppState>) -> WorkspaceIndexStatus {
+    match state.get_workspace_index() {
+        Some(index) => WorkspaceIndexStatus {
+            indexed: true,
+            root: Some(index.root.to_string_lossy().to_string()),
+            file_count: index.file_count(),
+            files_skipped: index.files_skipped,
+        },
+        None => WorkspaceIndexStatus {
+            indexed: false,
+            root: None,
+            file_count: 0,
+            files_skipped: 0,
+        },
+    }
+}
+
+/// Clear the workspace index
+#[tauri::command]
+fn clear_workspace_index(state: State<'_, AppState>) {
+    state.set_workspace_index(None);
+    println!("[WORKSPACE] Index cleared");
+}
+
+/// Workspace index status response
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceIndexStatus {
+    pub indexed: bool,
+    pub root: Option<String>,
+    pub file_count: usize,
+    pub files_skipped: usize,
+}
+
+/// Try to auto-detect a workspace root from the current directory.
+/// Walks up from the current directory looking for project markers.
+fn auto_detect_workspace() -> Option<std::path::PathBuf> {
+    use std::path::Path;
+
+    // Project markers that indicate a workspace root
+    const PROJECT_MARKERS: &[&str] = &[
+        ".git",
+        "package.json",
+        "Cargo.toml",
+        "pyproject.toml",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        ".project",
+    ];
+
+    // Start from current directory
+    let mut current = std::env::current_dir().ok()?;
+
+    // Walk up looking for project markers (max 10 levels)
+    for _ in 0..10 {
+        for marker in PROJECT_MARKERS {
+            if current.join(marker).exists() {
+                println!("[WORKSPACE] Auto-detected project root: {} (found {})",
+                    current.display(), marker);
+                return Some(current);
+            }
+        }
+
+        // Move up one directory
+        if !current.pop() {
+            break;
+        }
+    }
+
+    None
+}
+
+/// Build workspace index from auto-detected or configured path
+fn initialize_workspace_index(state: &AppState) {
+    // Try to auto-detect workspace
+    if let Some(workspace_path) = auto_detect_workspace() {
+        match ide::file_index::WorkspaceIndex::build(&workspace_path) {
+            Ok(index) => {
+                let file_count = index.file_count();
+                println!("[WORKSPACE] Auto-indexed {} files from {}",
+                    file_count, workspace_path.display());
+                state.set_workspace_index(Some(index));
+            }
+            Err(e) => {
+                println!("[WORKSPACE] Failed to build auto-detected index: {}", e);
+            }
+        }
+    } else {
+        println!("[WORKSPACE] No workspace auto-detected - file tagging disabled until workspace is set");
+    }
+}
+
 /// Insert text directly at cursor position
 /// Uses AppleScript keystroke for ASCII, clipboard paste for Unicode
 fn insert_text_directly(text: &str) {
@@ -978,6 +1243,11 @@ fn parse_hotkey(hotkey: &str) -> Option<Shortcut> {
 }
 
 /// Internal function to start recording from shortcut
+///
+/// ARCHITECTURE: Instant response, async context capture
+/// 1. INSTANT: Show overlay, start recording (user sees immediate feedback)
+/// 2. ASYNC: Capture context (app detection, selection) while user speaks
+/// 3. Context is ready by the time recording stops
 fn shortcut_start_recording(app_handle: &AppHandle) {
     let state: tauri::State<'_, AppState> = app_handle.state();
 
@@ -988,26 +1258,56 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
         return;
     }
 
-    // Update state FIRST to prevent race conditions
+    // Capture context BEFORE showing overlay (while original app has focus)
+    // These are quick calls (~10-30ms total) that must happen before overlay steals focus
+
+    // 1. Capture active app
+    let active_app_before_overlay = styles::detection::get_active_app();
+    println!(
+        "Active app captured: {:?}",
+        active_app_before_overlay.as_ref().map(|a| &a.bundle_id)
+    );
+
+    // 2. Capture selection (for Command Mode detection)
+    let selection_before_overlay = platform::selection::get_selected_text().ok();
+    let has_selection = selection_before_overlay.is_some();
+    println!(
+        "Selection captured: {} chars",
+        selection_before_overlay.as_ref().map(|s| s.len()).unwrap_or(0)
+    );
+
+    // =========================================================================
+    // PHASE 1: INSTANT RESPONSE (no blocking operations)
+    // =========================================================================
+
+    // Set state to Recording immediately
+    // Mode is set based on whether we captured a selection
     state.set_state(RecordingState::Recording);
+    if has_selection {
+        state.set_mode(DictationMode::Command);
+        state.set_selected_text(selection_before_overlay.clone());
+    } else {
+        state.set_mode(DictationMode::Dictation);
+    }
     if let Ok(mut start) = state.recording_start.lock() {
         *start = Some(std::time::Instant::now());
     }
 
-    // Show overlay window BEFORE emitting state change so it receives the event
-    // IMPORTANT: Don't set_focus() - we want to keep focus on the user's text field
+    // Show overlay IMMEDIATELY - no delay, no blocking calls before this
     if let Some(overlay) = app_handle.get_webview_window("overlay") {
-        // Position overlay at center-bottom with 300px offset from bottom
         position_overlay_center_bottom(&overlay, 300);
         let _ = overlay.show();
     }
 
-    // Small delay to ensure overlay is ready to receive events
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    // Emit initial state with correct mode
+    let initial_status = if has_selection {
+        "Command Mode".to_string()
+    } else {
+        "Recording...".to_string()
+    };
+    emit_state_change(app_handle, &state, Some(initial_status));
 
-    emit_state_change(app_handle, &state, Some("Recording started".to_string()));
-
-    // Start audio capture
+    // Start audio capture IMMEDIATELY
     let result = {
         let mut recorder = match state.recorder.lock() {
             Ok(r) => r,
@@ -1024,7 +1324,45 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
         state.set_state(RecordingState::Error);
         emit_error(app_handle, ErrorEvent::no_audio_device());
         println!("Failed to start recording: {}", e);
+        return;
     }
+
+    // =========================================================================
+    // PHASE 2: ASYNC CONTEXT PROCESSING (happens while user speaks)
+    // =========================================================================
+    // Note: App and selection were already captured BEFORE overlay
+    // This phase just processes context data that doesn't need to block
+
+    let active_app_captured = active_app_before_overlay;
+    let app_handle_for_context = app_handle.clone();
+
+    std::thread::spawn(move || {
+        let state: tauri::State<'_, AppState> = app_handle_for_context.state();
+
+        // Only proceed if we're still recording
+        if state.get_state() != RecordingState::Recording {
+            return;
+        }
+
+        // Process the captured app context (already captured before overlay)
+        let bundle_id = active_app_captured.as_ref().map(|a| a.bundle_id.clone());
+
+        // Get style for the active app
+        let active_style = match active_app_captured {
+            Some(ref app) => styles::get_style_for_app(app),
+            None => styles::get_default_style(),
+        };
+
+        let is_ide = bundle_id.as_ref().map(|b| ide::is_ide(b)).unwrap_or(false);
+        println!(
+            "Context processed (async): style={} ({}), bundle={:?}, is_ide={}",
+            active_style.name, active_style.id, bundle_id, is_ide
+        );
+
+        // Store context in state for use during transcription processing
+        state.set_active_style(Some(active_style));
+        state.set_active_bundle_id(bundle_id);
+    });
 }
 
 /// Internal function to stop recording from shortcut
@@ -1168,7 +1506,7 @@ fn shortcut_stop_recording(app_handle: AppHandle) {
                     }
                 };
                 // WhisperApiClient uses groq_api_key from config or GROQ_API_KEY env var
-                let client = whisper_api::WhisperApiClient::new(groq_key.unwrap_or_default());
+                let client = whisper_api::WhisperApiClient::new(groq_key.clone().unwrap_or_default());
                 match client.transcribe(&wav, &language, &spoken_languages).await {
                     Ok(t) => t,
                     Err(e) => {
@@ -1208,43 +1546,188 @@ fn shortcut_stop_recording(app_handle: AppHandle) {
 
         println!("Transcript ({}): {}", provider.to_string(), transcript);
 
-        // Update state to enhancing
-        state.set_state(RecordingState::Enhancing);
-        emit_state_change(&app_handle_clone, &state, Some("Enhancing...".to_string()));
+        // Apply IDE transformations if we're in a code editor
+        let active_bundle_id = state.get_active_bundle_id();
+        let workspace_index = state.get_workspace_index();
+        let transcript = if let Some(ref bundle_id) = active_bundle_id {
+            if ide::is_ide(bundle_id) {
+                let ide_context = ide::get_ide_context(bundle_id);
+                let ide_settings = ide::IDESettings::default();
 
-        // Enhance with Claude (if API key is available)
-        let enhanced_text = if let Some(api_key) = anthropic_key {
-            let claude_client = ClaudeClient::new(api_key, Some(claude_model));
-            match claude_client.enhance_text(&transcript, None).await {
-                Ok(t) => t,
-                Err(e) => {
-                    println!("Claude enhancement failed, using raw transcript: {}", e);
-                    emit_error(
-                        &app_handle_clone,
-                        ErrorEvent::claude_error(&e, Some(transcript.clone())),
-                    );
-                    transcript.clone()
+                // Pass workspace index if available - file tagging only works with an index
+                let transformed = ide::apply_ide_transformations(
+                    &transcript,
+                    &ide_context,
+                    &ide_settings,
+                    workspace_index.as_ref(),
+                );
+
+                if transformed != transcript {
+                    println!("IDE transformed: {}", transformed);
                 }
+                transformed
+            } else {
+                transcript
             }
         } else {
-            transcript.clone()
+            transcript
         };
 
-        println!("Enhanced: {}", enhanced_text);
+        // Get the current mode, selected text, and active style
+        let current_mode = state.get_mode();
+        let selected_text_for_transform = state.get_selected_text();
+        let active_style = state.get_active_style();
 
-        // Emit completion (text will be inserted, not just copied)
+        // Process based on mode
+        let final_text = match current_mode {
+            DictationMode::Command => {
+                // Selection detected - but is this a command or new content?
+                // Use LLM to classify intent before deciding how to process
+
+                let selected_text = match selected_text_for_transform {
+                    Some(text) => text,
+                    None => {
+                        // This shouldn't happen, but fall back to dictation
+                        println!("Command Mode but no selected text, falling back to raw transcript");
+                        transcript.clone()
+                    }
+                };
+
+                let groq_client = GroqLlmClient::new(groq_key.clone().unwrap_or_default());
+
+                // First, classify intent: is this a command or new content?
+                state.set_state(RecordingState::Transforming);
+                emit_state_change(&app_handle_clone, &state, Some("Analyzing...".to_string()));
+
+                let intent = match groq_client.classify_intent(&transcript).await {
+                    Ok(i) => i,
+                    Err(e) => {
+                        println!("Intent classification failed, defaulting to Dictation: {}", e);
+                        UserIntent::Dictation // Default to dictation on error - safer UX
+                    }
+                };
+
+                match intent {
+                    UserIntent::Command => {
+                        // User wants to transform the selected text
+                        emit_state_change(&app_handle_clone, &state, Some("Transforming...".to_string()));
+
+                        match groq_client.transform_text(&selected_text, &transcript).await {
+                            Ok(transformed) => {
+                                println!("Transformed text: {}", transformed);
+                                transformed
+                            }
+                            Err(e) => {
+                                println!("Transformation failed, keeping original: {}", e);
+                                emit_error(
+                                    &app_handle_clone,
+                                    ErrorEvent::groq_error(&e, Some(selected_text.clone())),
+                                );
+                                // On error, keep the original selected text
+                                selected_text
+                            }
+                        }
+                    }
+                    UserIntent::Dictation => {
+                        // User wants to replace selection with new dictated content
+                        // Enhance the transcript and use it to replace the selection
+                        println!("Intent: Dictation - will replace selection with new content");
+                        emit_state_change(&app_handle_clone, &state, Some("Enhancing...".to_string()));
+
+                        // Get style prompt modifier (if style was captured)
+                        let style_prompt = active_style.as_ref().map(|s| {
+                            println!("Applying style: {} ({})", s.name, s.id);
+                            s.prompt_modifier.as_str()
+                        });
+
+                        match groq_client.enhance_text(&transcript, style_prompt).await {
+                            Ok(enhanced) => {
+                                println!("Enhanced dictation (replacing selection): {}", enhanced);
+                                enhanced
+                            }
+                            Err(e) => {
+                                println!("Enhancement failed, using raw transcript: {}", e);
+                                emit_error(
+                                    &app_handle_clone,
+                                    ErrorEvent::groq_error(&e, Some(transcript.clone())),
+                                );
+                                transcript.clone()
+                            }
+                        }
+                    }
+                }
+            }
+            DictationMode::Dictation => {
+                // Dictation Mode: enhance transcription with context-aware style
+                state.set_state(RecordingState::Enhancing);
+                emit_state_change(&app_handle_clone, &state, Some("Enhancing...".to_string()));
+
+                // Get style prompt modifier (if style was captured)
+                let style_prompt = active_style.as_ref().map(|s| {
+                    println!("Applying style: {} ({})", s.name, s.id);
+                    s.prompt_modifier.as_str()
+                });
+
+                // Use Groq LLM for enhancement (primary), Claude as fallback
+                let groq_client = GroqLlmClient::new(groq_key.clone().unwrap_or_default());
+                println!("Before LLM enhancement: {}", transcript);
+                match groq_client.enhance_text(&transcript, style_prompt).await {
+                    Ok(enhanced) => {
+                        println!("Enhanced with Groq: {}", enhanced);
+                        enhanced
+                    }
+                    Err(groq_error) => {
+                        println!("Groq enhancement failed: {}", groq_error);
+                        // Fallback to Claude if available
+                        if let Some(api_key) = anthropic_key {
+                            let claude_client = ClaudeClient::new(api_key, Some(claude_model));
+                            match claude_client.enhance_text(&transcript, style_prompt).await {
+                                Ok(t) => {
+                                    println!("Fallback enhanced with Claude: {}", t);
+                                    t
+                                }
+                                Err(e) => {
+                                    println!("Claude fallback also failed: {}", e);
+                                    emit_error(
+                                        &app_handle_clone,
+                                        ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
+                                    );
+                                    transcript.clone()
+                                }
+                            }
+                        } else {
+                            emit_error(
+                                &app_handle_clone,
+                                ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
+                            );
+                            transcript.clone()
+                        }
+                    }
+                }
+            }
+        };
+
+        // Clean up any punctuation attached to @-tagged filenames
+        // (LLM may add punctuation like "@components.json?" which breaks references)
+        let final_text = ide::file_tagger::cleanup_tagged_punctuation(&final_text);
+
+        // Emit completion
         let completion_event = TranscriptionCompleteEvent {
             raw_transcript: transcript,
-            enhanced_text: enhanced_text.clone(),
-            copied_to_clipboard: false, // We're inserting directly now
+            enhanced_text: final_text.clone(),
+            copied_to_clipboard: false,
         };
 
         if let Err(e) = app_handle_clone.emit("transcription-complete", &completion_event) {
             eprintln!("Failed to emit completion: {}", e);
         }
 
-        // Return to idle
+        // Reset state
         state.set_state(RecordingState::Idle);
+        state.set_mode(DictationMode::Dictation);
+        state.set_selected_text(None);
+        state.set_active_style(None);
+        state.set_active_bundle_id(None);
         if let Ok(mut start) = state.recording_start.lock() {
             *start = None;
         }
@@ -1252,14 +1735,14 @@ fn shortcut_stop_recording(app_handle: AppHandle) {
 
         // Hide overlay, wait for previous app to regain focus, then insert text
         let app_for_hide = app_handle_clone.clone();
-        let text_to_insert = enhanced_text.clone();
+        let text_to_insert = final_text.clone();
         std::thread::spawn(move || {
             // Brief delay to show "Done!" state
             std::thread::sleep(std::time::Duration::from_millis(300));
             hide_overlay(&app_for_hide);
             // Wait for the previous app to regain focus
             std::thread::sleep(std::time::Duration::from_millis(100));
-            // Insert text while preserving clipboard
+            // Insert text (this replaces selection in Command Mode, inserts at cursor in Dictation Mode)
             insert_text_directly(&text_to_insert);
         });
     });
@@ -1386,6 +1869,10 @@ pub fn run() {
             clear_license,
             get_transcription_provider,
             set_transcription_provider,
+            // Workspace index commands
+            set_workspace_root,
+            get_workspace_status,
+            clear_workspace_index,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -1395,6 +1882,12 @@ pub fn run() {
 
             // Register global shortcut
             setup_global_shortcuts(app, &initial_hotkey, &initial_mode)?;
+
+            // Initialize workspace index for file tagging
+            {
+                let state: tauri::State<'_, AppState> = app.state();
+                initialize_workspace_index(&state);
+            }
 
             // Hide main window on start
             if let Some(window) = app.get_webview_window("main") {

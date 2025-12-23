@@ -1,5 +1,21 @@
 use serde::{Deserialize, Serialize};
 
+/// The mode of operation based on whether text is selected
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DictationMode {
+    /// Normal dictation - transcribe speech and insert text
+    Dictation,
+    /// Command mode - transform selected text using voice command
+    Command,
+}
+
+impl Default for DictationMode {
+    fn default() -> Self {
+        DictationMode::Dictation
+    }
+}
+
 /// Application recording state machine
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -10,8 +26,10 @@ pub enum RecordingState {
     Recording,
     /// Audio captured, sending to Deepgram for transcription
     Transcribing,
-    /// Transcript received, sending to Claude for enhancement
+    /// Transcript received, sending to Claude for enhancement (Dictation Mode)
     Enhancing,
+    /// Command Mode: transforming selected text with voice command
+    Transforming,
     /// Something went wrong
     Error,
 }
@@ -37,7 +55,10 @@ impl RecordingState {
     pub fn can_cancel(&self) -> bool {
         matches!(
             self,
-            RecordingState::Recording | RecordingState::Transcribing | RecordingState::Enhancing
+            RecordingState::Recording
+                | RecordingState::Transcribing
+                | RecordingState::Enhancing
+                | RecordingState::Transforming
         )
     }
 
@@ -54,6 +75,9 @@ pub struct StateChangeEvent {
     pub state: RecordingState,
     pub message: Option<String>,
     pub recording_duration_ms: Option<u64>,
+    /// The mode of operation (dictation or command)
+    #[serde(default)]
+    pub mode: DictationMode,
 }
 
 /// Audio level event payload for waveform visualization
@@ -184,6 +208,44 @@ impl ErrorEvent {
             message: "No transcription provider configured. Please set up Deepgram API key or activate a license.".to_string(),
             recoverable: true,
             fallback_text: None,
+        }
+    }
+
+    // Command Mode errors
+
+    pub fn no_selection() -> Self {
+        ErrorEvent {
+            code: "NO_SELECTION".to_string(),
+            message: "No text selected. Select text first to use Command Mode.".to_string(),
+            recoverable: true,
+            fallback_text: None,
+        }
+    }
+
+    pub fn accessibility_denied() -> Self {
+        ErrorEvent {
+            code: "ACCESSIBILITY_DENIED".to_string(),
+            message: "Accessibility permission denied. Enable in System Settings → Privacy → Accessibility.".to_string(),
+            recoverable: true,
+            fallback_text: None,
+        }
+    }
+
+    pub fn transformation_failed(msg: &str, fallback: Option<String>) -> Self {
+        ErrorEvent {
+            code: "TRANSFORMATION_FAILED".to_string(),
+            message: format!("Transformation failed: {}", msg),
+            recoverable: true,
+            fallback_text: fallback,
+        }
+    }
+
+    pub fn groq_error(msg: &str, fallback: Option<String>) -> Self {
+        ErrorEvent {
+            code: "GROQ_ERROR".to_string(),
+            message: format!("Groq LLM error: {}", msg),
+            recoverable: true,
+            fallback_text: fallback,
         }
     }
 }

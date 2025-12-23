@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { OverlayPill } from "./OverlayPill";
 import { tauriCommands, tauriEvents } from "@/lib/tauri";
 import { useOverlayAnimation } from "@/hooks";
-import type { RecordingState } from "@/types";
+import type { RecordingState, DictationMode } from "@/types";
 
 interface OverlayState {
   state: RecordingState;
   message: string;
   recordingDurationMs: number;
+  mode: DictationMode;
 }
 
 export function OverlayWindow() {
@@ -15,6 +16,7 @@ export function OverlayWindow() {
     state: "idle",
     message: "",
     recordingDurationMs: 0,
+    mode: "dictation",
   });
   const [audioLevel, setAudioLevel] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -53,8 +55,13 @@ export function OverlayWindow() {
   }, []);
 
   // Apply state changes
-  const applyState = useCallback((state: RecordingState, message: string | undefined, recordingDurationMs: number) => {
-    setOverlayState({ state, message: message || "", recordingDurationMs });
+  const applyState = useCallback((
+    state: RecordingState,
+    message: string | undefined,
+    recordingDurationMs: number,
+    mode: DictationMode = "dictation"
+  ) => {
+    setOverlayState({ state, message: message || "", recordingDurationMs, mode });
 
     if (state === "recording") {
       startTimer(recordingDurationMs || 0);
@@ -68,7 +75,12 @@ export function OverlayWindow() {
     const init = async () => {
       try {
         const initialState = await tauriCommands.getOverlayState();
-        applyState(initialState.state, initialState.message, initialState.recording_duration_ms || 0);
+        applyState(
+          initialState.state,
+          initialState.message,
+          initialState.recording_duration_ms || 0,
+          initialState.mode || "dictation"
+        );
       } catch (e) {
         console.error("Failed to get initial overlay state:", e);
       }
@@ -83,7 +95,12 @@ export function OverlayWindow() {
     let cleanup: (() => void) | undefined;
 
     tauriEvents.onStateChanged((event) => {
-      applyState(event.state, event.message, event.recording_duration_ms || 0);
+      applyState(
+        event.state,
+        event.message,
+        event.recording_duration_ms || 0,
+        event.mode || "dictation"
+      );
     }).then((unsub) => {
       cleanup = unsub;
     });
@@ -122,11 +139,13 @@ export function OverlayWindow() {
     }
   }, []);
 
-  // Status message based on state
+  // Status message based on state and mode
+  const isCommandMode = overlayState.mode === "command";
   const statusMessage =
-    overlayState.state === "recording" ? "Recording..." :
+    overlayState.state === "recording" ? (isCommandMode ? "Command Mode" : "Recording...") :
     overlayState.state === "transcribing" ? (overlayState.message || "Transcribing...") :
     overlayState.state === "enhancing" ? (overlayState.message || "Enhancing...") :
+    overlayState.state === "transforming" ? (overlayState.message || "Transforming...") :
     overlayState.state === "idle" && overlayState.message === "Done!" ? "Done!" :
     overlayState.state === "error" ? "Error" :
     overlayState.message || "";
@@ -136,6 +155,7 @@ export function OverlayWindow() {
       <div ref={containerRef} className="w-fit">
         <OverlayPill
           state={overlayState.state}
+          mode={overlayState.mode}
           statusMessage={statusMessage}
           audioLevel={audioLevel}
           elapsedSeconds={elapsedSeconds}

@@ -46,3 +46,15 @@ num_cpus = "1.16"        # CPU count for thread optimization
 chrono = "0.4"           # Date/time for license caching
 any_ascii = "0.3"        # Unicode to ASCII transliteration for romanized output
 
+# Command Mode - macOS Accessibility API
+get-selected-text = "0.1"  # Get selected text from any app via Accessibility API
+regex = "1"                # Pattern matching for selection validation
+
+# IDE Integrations (Phase 3)
+walkdir = "2"              # Recursive file walking for workspace indexing
+ignore = "0.4"             # Respects .gitignore when walking files
+fuzzy-matcher = "0.3"      # Fuzzy string matching for file tagging
+
+[dev-dependencies]
+tempfile = "3"             # Temporary directories for testing
+

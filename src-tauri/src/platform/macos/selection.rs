@@ -8,6 +8,13 @@
 //! Uses the macOS Accessibility API exclusively. No clipboard fallback for reading.
 
 use get_selected_text::get_selected_text as get_selected_text_impl;
+use regex::Regex;
+use std::sync::LazyLock;
+
+/// Static UUID pattern regex - compiled once and reused
+static UUID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}").unwrap()
+});
 
 /// Error types for selection operations
 #[derive(Debug)]
@@ -29,25 +36,25 @@ pub enum SelectionError {
 fn is_valid_selection(text: &str) -> bool {
     // Reject VS Code webview panel identifiers
     if text.contains("webview-panel/") || text.contains("webview-") {
-        println!("Rejecting VS Code webview identifier: {}", text);
+        #[cfg(debug_assertions)]
+        println!("[SELECTION] Rejecting VS Code webview identifier");
         return false;
     }
 
     // Reject paths that look like internal URIs
     if text.starts_with("vscode-") || text.starts_with("file://") {
-        println!("Rejecting internal URI: {}", text);
+        #[cfg(debug_assertions)]
+        println!("[SELECTION] Rejecting internal URI");
         return false;
     }
 
     // Reject UUID-like strings (common in accessibility tree paths)
     // Pattern: contains multiple UUID segments like "8ab98c93-a228-4d81-bcbe-8c175dddd3fa"
-    let uuid_pattern = regex::Regex::new(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}").ok();
-    if let Some(re) = uuid_pattern {
-        if re.is_match(text) && text.len() < 100 {
-            // Short text that's mostly a UUID is likely an internal identifier
-            println!("Rejecting UUID-like selection: {}", text);
-            return false;
-        }
+    if UUID_PATTERN.is_match(text) && text.len() < 100 {
+        // Short text that's mostly a UUID is likely an internal identifier
+        #[cfg(debug_assertions)]
+        println!("[SELECTION] Rejecting UUID-like selection");
+        return false;
     }
 
     true
@@ -95,8 +102,9 @@ pub fn get_selected_text() -> Result<String, SelectionError> {
                 // Reject bogus selections (like VS Code webview paths)
                 Err(SelectionError::InvalidSelection(text))
             } else {
-                println!("Got selected text ({} chars): {:?}", text.len(),
-                    if text.len() > 50 { format!("{}...", &text[..50]) } else { text.clone() });
+                // Note: Not logging selected text content to avoid leaking sensitive data
+                #[cfg(debug_assertions)]
+                println!("[SELECTION] Got {} chars", text.len());
                 Ok(text)
             }
         }

@@ -15,9 +15,9 @@ const CLI_PATTERNS: &[(&str, &str)] = &[
     ("double dash", "--"),
     ("hyphen hyphen", "--"),
 
-    // Single dash options
-    ("dash ", "-"),
-    ("hyphen ", "-"),
+    // Single dash options (handled by DASH_LETTER_PATTERN for "dash [letter]")
+    // Removed "dash " and "hyphen " with trailing spaces - they don't match with \b word boundaries
+    // and are better handled by the specialized DASH_LETTER_PATTERN regex
 
     // Operators
     ("pipe", "|"),

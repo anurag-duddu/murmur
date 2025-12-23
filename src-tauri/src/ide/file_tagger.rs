@@ -218,18 +218,16 @@ fn apply_file_prefix_pattern(text: &str, index: &WorkspaceIndex) -> String {
         let name = captures.get(1).unwrap().as_str();
 
         // Handle "file name dot extension"
-        let (base_name, extension) = if name.to_lowercase().contains(" dot ") {
-            let parts: Vec<&str> = name.splitn(2, |c: char| {
-                c.to_lowercase().to_string() == "dot"
-                    || name.to_lowercase().contains(" dot ")
-            }).collect();
-            if parts.len() == 2 {
-                (parts[0].trim(), Some(parts[1].trim()))
+        let (base_name, extension) = {
+            let lower = name.to_lowercase();
+            if let Some(dot_idx) = lower.find(" dot ") {
+                // Split at the " dot " marker, preserving original casing
+                let base = name[..dot_idx].trim();
+                let ext = name[dot_idx + 5..].trim(); // 5 = len(" dot ")
+                (base, Some(ext))
             } else {
                 (name, None)
             }
-        } else {
-            (name, None)
         };
 
         // Try to find a matching file

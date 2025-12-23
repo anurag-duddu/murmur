@@ -153,7 +153,7 @@ const DEFAULT_MAPPINGS: &[(&str, &str)] = &[
     ("com.github.GitHubDesktop", "technical"),      // GitHub Desktop
     ("com.sublimemerge.Sublime-Merge", "technical"), // Sublime Merge
     ("com.gitkraken.gitkraken", "technical"),       // GitKraken
-    ("abnerworks.Typora", "technical"),             // Typora
+    // Note: Typora is already listed above at line 109
     ("io.podman-desktop.PodmanDesktop", "technical"), // Podman Desktop
 
     // Generic Electron (fallback)

@@ -419,3 +419,153 @@ fn calculate_levels(samples: &[f32]) -> (f32, f32) {
 
     (level, peak_normalized)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== calculate_levels Tests ====================
+
+    #[test]
+    fn test_calculate_levels_empty_samples() {
+        let (level, peak) = calculate_levels(&[]);
+        assert_eq!(level, 0.0);
+        assert_eq!(peak, 0.0);
+    }
+
+    #[test]
+    fn test_calculate_levels_silence() {
+        // Complete silence (all zeros)
+        let samples = vec![0.0; 1000];
+        let (level, peak) = calculate_levels(&samples);
+        assert_eq!(level, 0.0);
+        assert_eq!(peak, 0.0);
+    }
+
+    #[test]
+    fn test_calculate_levels_max_amplitude() {
+        // Maximum amplitude (all 1.0)
+        let samples = vec![1.0; 1000];
+        let (level, peak) = calculate_levels(&samples);
+        assert!((level - 1.0).abs() < 0.01, "Level should be near 1.0, got {}", level);
+        assert!((peak - 1.0).abs() < 0.01, "Peak should be near 1.0, got {}", peak);
+    }
+
+    #[test]
+    fn test_calculate_levels_negative_max_amplitude() {
+        // Maximum negative amplitude (all -1.0)
+        let samples = vec![-1.0; 1000];
+        let (level, peak) = calculate_levels(&samples);
+        assert!((level - 1.0).abs() < 0.01, "Level should be near 1.0, got {}", level);
+        assert!((peak - 1.0).abs() < 0.01, "Peak should be near 1.0, got {}", peak);
+    }
+
+    #[test]
+    fn test_calculate_levels_mixed_amplitude() {
+        // Alternating positive and negative samples
+        let samples: Vec<f32> = (0..1000).map(|i| if i % 2 == 0 { 0.5 } else { -0.5 }).collect();
+        let (level, peak) = calculate_levels(&samples);
+
+        // RMS should be around 0.5, peak should be 0.5
+        // In dB: 20 * log10(0.5) ≈ -6 dB
+        // Normalized: (-6 - (-60)) / 60 = 54/60 = 0.9
+        assert!(level > 0.8 && level < 1.0, "Level should be around 0.9, got {}", level);
+        assert!(peak > 0.8 && peak < 1.0, "Peak should be around 0.9, got {}", peak);
+    }
+
+    #[test]
+    fn test_calculate_levels_very_quiet() {
+        // Very quiet signal (0.001 amplitude)
+        // 20 * log10(0.001) = -60 dB, which is the minimum
+        let samples = vec![0.001; 1000];
+        let (level, peak) = calculate_levels(&samples);
+        assert!(level >= 0.0 && level < 0.1, "Level should be near 0, got {}", level);
+        assert!(peak >= 0.0 && peak < 0.1, "Peak should be near 0, got {}", peak);
+    }
+
+    #[test]
+    fn test_calculate_levels_single_sample() {
+        let (level, peak) = calculate_levels(&[0.5]);
+        assert!(level > 0.0 && level < 1.0, "Level should be between 0 and 1");
+        assert!(peak > 0.0 && peak < 1.0, "Peak should be between 0 and 1");
+    }
+
+    #[test]
+    fn test_calculate_levels_spike_detection() {
+        // Mostly quiet with one loud spike
+        let mut samples = vec![0.01; 999];
+        samples.push(1.0);
+        let (level, peak) = calculate_levels(&samples);
+
+        // Peak should detect the spike
+        assert!((peak - 1.0).abs() < 0.01, "Peak should detect the spike, got {}", peak);
+        // RMS level should be much lower than peak
+        assert!(level < peak, "RMS should be lower than peak");
+    }
+
+    #[test]
+    fn test_calculate_levels_returns_in_range() {
+        // Test with random-ish values to ensure output is always in [0, 1]
+        let samples: Vec<f32> = (0..100).map(|i| {
+            let x = (i as f32 * 0.1).sin() * 0.8;
+            x
+        }).collect();
+        let (level, peak) = calculate_levels(&samples);
+
+        assert!(level >= 0.0 && level <= 1.0, "Level must be in [0, 1], got {}", level);
+        assert!(peak >= 0.0 && peak <= 1.0, "Peak must be in [0, 1], got {}", peak);
+    }
+
+    #[test]
+    fn test_calculate_levels_above_unity_clamps() {
+        // If somehow we get samples > 1.0, peak should clamp to 1.0
+        let samples = vec![2.0; 100]; // Above unity
+        let (level, peak) = calculate_levels(&samples);
+        assert_eq!(peak, 1.0, "Peak should clamp to 1.0");
+        assert_eq!(level, 1.0, "Level should clamp to 1.0");
+    }
+
+    // ==================== AudioRecorder Tests ====================
+
+    #[test]
+    fn test_audio_recorder_new() {
+        let recorder = AudioRecorder::new();
+        // Default sample rate should be 48000
+        assert_eq!(recorder.sample_rate, 48000);
+        assert!(!recorder.is_recording.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_audio_recorder_default() {
+        let recorder = AudioRecorder::default();
+        assert_eq!(recorder.sample_rate, 48000);
+    }
+
+    // ==================== Resampling Tests ====================
+    // Note: Full resampling tests require more setup, but we can test edge cases
+
+    #[test]
+    fn test_resample_same_rate_returns_copy() {
+        let recorder = AudioRecorder {
+            audio_data: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            sample_rate: 16000, // Same as WHISPER_SAMPLE_RATE
+            is_recording: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            recent_samples: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        };
+
+        let samples = vec![0.1, 0.2, 0.3, 0.4, 0.5];
+        let result = recorder.resample_to_16khz(&samples).unwrap();
+
+        assert_eq!(result.len(), samples.len());
+        for (a, b) in result.iter().zip(samples.iter()) {
+            assert!((a - b).abs() < 0.001, "Samples should match");
+        }
+    }
+
+    #[test]
+    fn test_resample_empty_input() {
+        let recorder = AudioRecorder::new();
+        let result = recorder.resample_to_16khz(&[]).unwrap();
+        assert!(result.is_empty());
+    }
+}

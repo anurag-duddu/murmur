@@ -249,3 +249,378 @@ impl ErrorEvent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== DictationMode Tests ====================
+
+    #[test]
+    fn test_dictation_mode_default() {
+        let mode = DictationMode::default();
+        assert_eq!(mode, DictationMode::Dictation);
+    }
+
+    #[test]
+    fn test_dictation_mode_serialization() {
+        let dictation = DictationMode::Dictation;
+        let command = DictationMode::Command;
+
+        assert_eq!(serde_json::to_string(&dictation).unwrap(), "\"dictation\"");
+        assert_eq!(serde_json::to_string(&command).unwrap(), "\"command\"");
+    }
+
+    #[test]
+    fn test_dictation_mode_deserialization() {
+        let dictation: DictationMode = serde_json::from_str("\"dictation\"").unwrap();
+        let command: DictationMode = serde_json::from_str("\"command\"").unwrap();
+
+        assert_eq!(dictation, DictationMode::Dictation);
+        assert_eq!(command, DictationMode::Command);
+    }
+
+    // ==================== RecordingState Tests ====================
+
+    #[test]
+    fn test_recording_state_default() {
+        let state = RecordingState::default();
+        assert_eq!(state, RecordingState::Idle);
+    }
+
+    #[test]
+    fn test_recording_state_serialization() {
+        assert_eq!(serde_json::to_string(&RecordingState::Idle).unwrap(), "\"idle\"");
+        assert_eq!(serde_json::to_string(&RecordingState::Recording).unwrap(), "\"recording\"");
+        assert_eq!(serde_json::to_string(&RecordingState::Transcribing).unwrap(), "\"transcribing\"");
+        assert_eq!(serde_json::to_string(&RecordingState::Enhancing).unwrap(), "\"enhancing\"");
+        assert_eq!(serde_json::to_string(&RecordingState::Transforming).unwrap(), "\"transforming\"");
+        assert_eq!(serde_json::to_string(&RecordingState::Error).unwrap(), "\"error\"");
+    }
+
+    #[test]
+    fn test_can_start_recording_from_idle() {
+        let state = RecordingState::Idle;
+        assert!(state.can_start_recording());
+    }
+
+    #[test]
+    fn test_can_start_recording_from_error() {
+        let state = RecordingState::Error;
+        assert!(state.can_start_recording());
+    }
+
+    #[test]
+    fn test_cannot_start_recording_while_recording() {
+        let state = RecordingState::Recording;
+        assert!(!state.can_start_recording());
+    }
+
+    #[test]
+    fn test_cannot_start_recording_while_transcribing() {
+        let state = RecordingState::Transcribing;
+        assert!(!state.can_start_recording());
+    }
+
+    #[test]
+    fn test_cannot_start_recording_while_enhancing() {
+        let state = RecordingState::Enhancing;
+        assert!(!state.can_start_recording());
+    }
+
+    #[test]
+    fn test_cannot_start_recording_while_transforming() {
+        let state = RecordingState::Transforming;
+        assert!(!state.can_start_recording());
+    }
+
+    #[test]
+    fn test_can_stop_recording_while_recording() {
+        let state = RecordingState::Recording;
+        assert!(state.can_stop_recording());
+    }
+
+    #[test]
+    fn test_cannot_stop_recording_from_idle() {
+        let state = RecordingState::Idle;
+        assert!(!state.can_stop_recording());
+    }
+
+    #[test]
+    fn test_cannot_stop_recording_while_transcribing() {
+        let state = RecordingState::Transcribing;
+        assert!(!state.can_stop_recording());
+    }
+
+    #[test]
+    fn test_can_cancel_while_recording() {
+        let state = RecordingState::Recording;
+        assert!(state.can_cancel());
+    }
+
+    #[test]
+    fn test_can_cancel_while_transcribing() {
+        let state = RecordingState::Transcribing;
+        assert!(state.can_cancel());
+    }
+
+    #[test]
+    fn test_can_cancel_while_enhancing() {
+        let state = RecordingState::Enhancing;
+        assert!(state.can_cancel());
+    }
+
+    #[test]
+    fn test_can_cancel_while_transforming() {
+        let state = RecordingState::Transforming;
+        assert!(state.can_cancel());
+    }
+
+    #[test]
+    fn test_cannot_cancel_from_idle() {
+        let state = RecordingState::Idle;
+        assert!(!state.can_cancel());
+    }
+
+    #[test]
+    fn test_cannot_cancel_from_error() {
+        let state = RecordingState::Error;
+        assert!(!state.can_cancel());
+    }
+
+    #[test]
+    fn test_is_busy_while_recording() {
+        let state = RecordingState::Recording;
+        assert!(state.is_busy());
+    }
+
+    #[test]
+    fn test_is_busy_while_transcribing() {
+        let state = RecordingState::Transcribing;
+        assert!(state.is_busy());
+    }
+
+    #[test]
+    fn test_is_busy_while_enhancing() {
+        let state = RecordingState::Enhancing;
+        assert!(state.is_busy());
+    }
+
+    #[test]
+    fn test_is_busy_while_transforming() {
+        let state = RecordingState::Transforming;
+        assert!(state.is_busy());
+    }
+
+    #[test]
+    fn test_not_busy_when_idle() {
+        let state = RecordingState::Idle;
+        assert!(!state.is_busy());
+    }
+
+    #[test]
+    fn test_not_busy_when_error() {
+        let state = RecordingState::Error;
+        assert!(!state.is_busy());
+    }
+
+    // ==================== StateChangeEvent Tests ====================
+
+    #[test]
+    fn test_state_change_event_serialization() {
+        let event = StateChangeEvent {
+            state: RecordingState::Recording,
+            message: Some("Recording started".to_string()),
+            recording_duration_ms: Some(1500),
+            mode: DictationMode::Dictation,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"state\":\"recording\""));
+        assert!(json.contains("\"message\":\"Recording started\""));
+        assert!(json.contains("\"recordingDurationMs\":1500"));
+        assert!(json.contains("\"mode\":\"dictation\""));
+    }
+
+    #[test]
+    fn test_state_change_event_with_none_values() {
+        let event = StateChangeEvent {
+            state: RecordingState::Idle,
+            message: None,
+            recording_duration_ms: None,
+            mode: DictationMode::default(),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"state\":\"idle\""));
+        assert!(json.contains("\"message\":null"));
+    }
+
+    // ==================== AudioLevelEvent Tests ====================
+
+    #[test]
+    fn test_audio_level_event_serialization() {
+        let event = AudioLevelEvent {
+            level: 0.75,
+            peak: 0.95,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"level\":0.75"));
+        assert!(json.contains("\"peak\":0.95"));
+    }
+
+    // ==================== TranscriptionCompleteEvent Tests ====================
+
+    #[test]
+    fn test_transcription_complete_event_serialization() {
+        let event = TranscriptionCompleteEvent {
+            raw_transcript: "hello world".to_string(),
+            enhanced_text: "Hello, world!".to_string(),
+            copied_to_clipboard: true,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"rawTranscript\":\"hello world\""));
+        assert!(json.contains("\"enhancedText\":\"Hello, world!\""));
+        assert!(json.contains("\"copiedToClipboard\":true"));
+    }
+
+    // ==================== ErrorEvent Tests ====================
+
+    #[test]
+    fn test_error_event_mic_permission_denied() {
+        let event = ErrorEvent::mic_permission_denied();
+        assert_eq!(event.code, "MIC_PERMISSION_DENIED");
+        assert!(event.message.contains("Microphone access denied"));
+        assert!(event.recoverable);
+        assert!(event.fallback_text.is_none());
+    }
+
+    #[test]
+    fn test_error_event_no_audio_device() {
+        let event = ErrorEvent::no_audio_device();
+        assert_eq!(event.code, "NO_AUDIO_DEVICE");
+        assert!(event.message.contains("No microphone found"));
+        assert!(event.recoverable);
+    }
+
+    #[test]
+    fn test_error_event_no_audio_captured() {
+        let event = ErrorEvent::no_audio_captured();
+        assert_eq!(event.code, "NO_AUDIO_CAPTURED");
+        assert!(event.message.contains("No audio was captured"));
+        assert!(event.recoverable);
+    }
+
+    #[test]
+    fn test_error_event_deepgram_error() {
+        let event = ErrorEvent::deepgram_error("API timeout");
+        assert_eq!(event.code, "DEEPGRAM_ERROR");
+        assert!(event.message.contains("API timeout"));
+        assert!(event.recoverable);
+    }
+
+    #[test]
+    fn test_error_event_claude_error_with_fallback() {
+        let event = ErrorEvent::claude_error("Rate limited", Some("raw text".to_string()));
+        assert_eq!(event.code, "CLAUDE_ERROR");
+        assert!(event.message.contains("Rate limited"));
+        assert_eq!(event.fallback_text, Some("raw text".to_string()));
+    }
+
+    #[test]
+    fn test_error_event_claude_error_without_fallback() {
+        let event = ErrorEvent::claude_error("API error", None);
+        assert_eq!(event.code, "CLAUDE_ERROR");
+        assert!(event.fallback_text.is_none());
+    }
+
+    #[test]
+    fn test_error_event_network_error() {
+        let event = ErrorEvent::network_error("Connection refused");
+        assert_eq!(event.code, "NETWORK_ERROR");
+        assert!(event.message.contains("Connection refused"));
+    }
+
+    #[test]
+    fn test_error_event_whisper_error() {
+        let event = ErrorEvent::whisper_error("Model inference failed");
+        assert_eq!(event.code, "WHISPER_ERROR");
+        assert!(event.message.contains("Model inference failed"));
+    }
+
+    #[test]
+    fn test_error_event_model_not_loaded() {
+        let event = ErrorEvent::model_not_loaded();
+        assert_eq!(event.code, "MODEL_NOT_LOADED");
+        assert!(event.message.contains("not loaded"));
+    }
+
+    #[test]
+    fn test_error_event_model_download_failed() {
+        let event = ErrorEvent::model_download_failed("Network timeout");
+        assert_eq!(event.code, "MODEL_DOWNLOAD_FAILED");
+        assert!(event.message.contains("Network timeout"));
+    }
+
+    #[test]
+    fn test_error_event_license_invalid() {
+        let event = ErrorEvent::license_invalid("Expired");
+        assert_eq!(event.code, "LICENSE_INVALID");
+        assert!(event.message.contains("Expired"));
+    }
+
+    #[test]
+    fn test_error_event_no_transcription_provider() {
+        let event = ErrorEvent::no_transcription_provider();
+        assert_eq!(event.code, "NO_TRANSCRIPTION_PROVIDER");
+        assert!(event.message.contains("No transcription provider"));
+    }
+
+    #[test]
+    fn test_error_event_no_selection() {
+        let event = ErrorEvent::no_selection();
+        assert_eq!(event.code, "NO_SELECTION");
+        assert!(event.message.contains("No text selected"));
+    }
+
+    #[test]
+    fn test_error_event_accessibility_denied() {
+        let event = ErrorEvent::accessibility_denied();
+        assert_eq!(event.code, "ACCESSIBILITY_DENIED");
+        assert!(event.message.contains("Accessibility permission denied"));
+    }
+
+    #[test]
+    fn test_error_event_transformation_failed() {
+        let event = ErrorEvent::transformation_failed("Invalid command", Some("original".to_string()));
+        assert_eq!(event.code, "TRANSFORMATION_FAILED");
+        assert!(event.message.contains("Invalid command"));
+        assert_eq!(event.fallback_text, Some("original".to_string()));
+    }
+
+    #[test]
+    fn test_error_event_groq_error() {
+        let event = ErrorEvent::groq_error("API limit", Some("fallback".to_string()));
+        assert_eq!(event.code, "GROQ_ERROR");
+        assert!(event.message.contains("API limit"));
+        assert_eq!(event.fallback_text, Some("fallback".to_string()));
+    }
+
+    #[test]
+    fn test_error_event_serialization() {
+        let event = ErrorEvent {
+            code: "TEST_ERROR".to_string(),
+            message: "Test message".to_string(),
+            recoverable: false,
+            fallback_text: Some("fallback".to_string()),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"code\":\"TEST_ERROR\""));
+        assert!(json.contains("\"message\":\"Test message\""));
+        assert!(json.contains("\"recoverable\":false"));
+        assert!(json.contains("\"fallbackText\":\"fallback\""));
+    }
+}

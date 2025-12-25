@@ -252,3 +252,202 @@ pub struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spoken_languages: Option<Vec<String>>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== TranscriptionProvider Tests ====================
+
+    #[test]
+    fn test_transcription_provider_default() {
+        let provider = TranscriptionProvider::default();
+        assert_eq!(provider, TranscriptionProvider::Deepgram);
+    }
+
+    #[test]
+    fn test_transcription_provider_from_string_deepgram() {
+        assert_eq!(TranscriptionProvider::from_string("deepgram"), TranscriptionProvider::Deepgram);
+        assert_eq!(TranscriptionProvider::from_string("DEEPGRAM"), TranscriptionProvider::Deepgram);
+        assert_eq!(TranscriptionProvider::from_string("Deepgram"), TranscriptionProvider::Deepgram);
+    }
+
+    #[test]
+    fn test_transcription_provider_from_string_whisper_api() {
+        assert_eq!(TranscriptionProvider::from_string("whisperapi"), TranscriptionProvider::WhisperApi);
+        assert_eq!(TranscriptionProvider::from_string("whisper_api"), TranscriptionProvider::WhisperApi);
+        assert_eq!(TranscriptionProvider::from_string("whisper-api"), TranscriptionProvider::WhisperApi);
+        assert_eq!(TranscriptionProvider::from_string("WHISPERAPI"), TranscriptionProvider::WhisperApi);
+    }
+
+    #[test]
+    fn test_transcription_provider_from_string_whisper_local() {
+        assert_eq!(TranscriptionProvider::from_string("whisperlocal"), TranscriptionProvider::WhisperLocal);
+        assert_eq!(TranscriptionProvider::from_string("whisper_local"), TranscriptionProvider::WhisperLocal);
+        assert_eq!(TranscriptionProvider::from_string("whisper-local"), TranscriptionProvider::WhisperLocal);
+        assert_eq!(TranscriptionProvider::from_string("WHISPERLOCAL"), TranscriptionProvider::WhisperLocal);
+    }
+
+    #[test]
+    fn test_transcription_provider_from_string_unknown_defaults_to_deepgram() {
+        assert_eq!(TranscriptionProvider::from_string("unknown"), TranscriptionProvider::Deepgram);
+        assert_eq!(TranscriptionProvider::from_string(""), TranscriptionProvider::Deepgram);
+        assert_eq!(TranscriptionProvider::from_string("openai"), TranscriptionProvider::Deepgram);
+    }
+
+    #[test]
+    fn test_transcription_provider_to_string() {
+        assert_eq!(TranscriptionProvider::Deepgram.to_string(), "deepgram");
+        assert_eq!(TranscriptionProvider::WhisperApi.to_string(), "whisperapi");
+        assert_eq!(TranscriptionProvider::WhisperLocal.to_string(), "whisperlocal");
+    }
+
+    #[test]
+    fn test_transcription_provider_serialization() {
+        assert_eq!(serde_json::to_string(&TranscriptionProvider::Deepgram).unwrap(), "\"deepgram\"");
+        assert_eq!(serde_json::to_string(&TranscriptionProvider::WhisperApi).unwrap(), "\"whisperapi\"");
+        assert_eq!(serde_json::to_string(&TranscriptionProvider::WhisperLocal).unwrap(), "\"whisperlocal\"");
+    }
+
+    #[test]
+    fn test_transcription_provider_deserialization() {
+        let deepgram: TranscriptionProvider = serde_json::from_str("\"deepgram\"").unwrap();
+        let whisper_api: TranscriptionProvider = serde_json::from_str("\"whisperapi\"").unwrap();
+        let whisper_local: TranscriptionProvider = serde_json::from_str("\"whisperlocal\"").unwrap();
+
+        assert_eq!(deepgram, TranscriptionProvider::Deepgram);
+        assert_eq!(whisper_api, TranscriptionProvider::WhisperApi);
+        assert_eq!(whisper_local, TranscriptionProvider::WhisperLocal);
+    }
+
+    // ==================== StoredPreferences Tests ====================
+
+    #[test]
+    fn test_stored_preferences_default() {
+        let prefs = StoredPreferences::default();
+        assert!(prefs.deepgram_api_key.is_none());
+        assert!(prefs.groq_api_key.is_none());
+        assert!(prefs.anthropic_api_key.is_none());
+        assert!(prefs.recording_mode.is_none());
+        assert!(prefs.hotkey.is_none());
+        assert!(prefs.show_indicator.is_none());
+        assert!(prefs.play_sounds.is_none());
+        assert!(prefs.microphone.is_none());
+        assert!(prefs.language.is_none());
+        assert!(prefs.transcription_provider.is_none());
+        assert!(prefs.license_key.is_none());
+        assert!(prefs.onboarding_complete.is_none());
+        assert!(prefs.spoken_languages.is_none());
+    }
+
+    #[test]
+    fn test_stored_preferences_serialization() {
+        let prefs = StoredPreferences {
+            deepgram_api_key: Some("dg_key".to_string()),
+            groq_api_key: Some("groq_key".to_string()),
+            anthropic_api_key: Some("claude_key".to_string()),
+            recording_mode: Some("push-to-talk".to_string()),
+            hotkey: Some("Option+Space".to_string()),
+            show_indicator: Some(true),
+            play_sounds: Some(false),
+            microphone: Some("default".to_string()),
+            language: Some("en-US".to_string()),
+            transcription_provider: Some("deepgram".to_string()),
+            license_key: Some("license123".to_string()),
+            onboarding_complete: Some(true),
+            spoken_languages: Some(vec!["en".to_string(), "es".to_string()]),
+        };
+
+        let json = serde_json::to_string(&prefs).unwrap();
+        assert!(json.contains("\"deepgram_api_key\":\"dg_key\""));
+        assert!(json.contains("\"recording_mode\":\"push-to-talk\""));
+        assert!(json.contains("\"show_indicator\":true"));
+        assert!(json.contains("\"spoken_languages\":[\"en\",\"es\"]"));
+    }
+
+    #[test]
+    fn test_stored_preferences_deserialization() {
+        let json = r#"{
+            "deepgram_api_key": "test_key",
+            "recording_mode": "toggle",
+            "show_indicator": false
+        }"#;
+
+        let prefs: StoredPreferences = serde_json::from_str(json).unwrap();
+        assert_eq!(prefs.deepgram_api_key, Some("test_key".to_string()));
+        assert_eq!(prefs.recording_mode, Some("toggle".to_string()));
+        assert_eq!(prefs.show_indicator, Some(false));
+        assert!(prefs.hotkey.is_none()); // Not in JSON, should be None
+    }
+
+    #[test]
+    fn test_stored_preferences_partial_deserialization() {
+        // Test that missing fields default to None
+        let json = r#"{}"#;
+        let prefs: StoredPreferences = serde_json::from_str(json).unwrap();
+        assert!(prefs.deepgram_api_key.is_none());
+        assert!(prefs.recording_mode.is_none());
+    }
+
+    // ==================== Preferences Tests ====================
+
+    #[test]
+    fn test_preferences_serialization_skips_none() {
+        let prefs = Preferences {
+            recording_mode: "push-to-talk".to_string(),
+            hotkey: "Option+Space".to_string(),
+            show_indicator: true,
+            play_sounds: true,
+            microphone: "default".to_string(),
+            language: "en-US".to_string(),
+            deepgram_key: "".to_string(),
+            anthropic_key: "".to_string(),
+            transcription_provider: None,
+            license_key: None,
+            onboarding_complete: None,
+            spoken_languages: None,
+        };
+
+        let json = serde_json::to_string(&prefs).unwrap();
+        // Optional None fields should be skipped
+        assert!(!json.contains("transcription_provider"));
+        assert!(!json.contains("license_key"));
+        assert!(!json.contains("onboarding_complete"));
+        assert!(!json.contains("spoken_languages"));
+    }
+
+    #[test]
+    fn test_preferences_serialization_includes_some() {
+        let prefs = Preferences {
+            recording_mode: "toggle".to_string(),
+            hotkey: "Cmd+Shift+M".to_string(),
+            show_indicator: false,
+            play_sounds: false,
+            microphone: "USB Microphone".to_string(),
+            language: "es-ES".to_string(),
+            deepgram_key: "dg_key".to_string(),
+            anthropic_key: "sk_key".to_string(),
+            transcription_provider: Some("whisperapi".to_string()),
+            license_key: Some("license".to_string()),
+            onboarding_complete: Some(true),
+            spoken_languages: Some(vec!["en".to_string()]),
+        };
+
+        let json = serde_json::to_string(&prefs).unwrap();
+        assert!(json.contains("\"transcription_provider\":\"whisperapi\""));
+        assert!(json.contains("\"license_key\":\"license\""));
+        assert!(json.contains("\"onboarding_complete\":true"));
+    }
+
+    // ==================== Provider Roundtrip Tests ====================
+
+    #[test]
+    fn test_provider_roundtrip() {
+        // Test that from_string -> to_string is consistent
+        for provider_str in &["deepgram", "whisperapi", "whisperlocal"] {
+            let provider = TranscriptionProvider::from_string(provider_str);
+            let result = provider.to_string();
+            assert_eq!(&result, *provider_str);
+        }
+    }
+}

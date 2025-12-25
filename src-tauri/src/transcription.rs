@@ -92,3 +92,190 @@ pub fn get_best_provider(
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== is_provider_available Tests ====================
+
+    #[test]
+    fn test_deepgram_available_with_key() {
+        let result = is_provider_available(
+            &TranscriptionProvider::Deepgram,
+            Some("dg_key_123"),
+            None,
+            false,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_deepgram_unavailable_without_key() {
+        let result = is_provider_available(
+            &TranscriptionProvider::Deepgram,
+            None,
+            None,
+            false,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_whisper_api_available_with_license() {
+        let result = is_provider_available(
+            &TranscriptionProvider::WhisperApi,
+            None,
+            Some("license_key"),
+            false,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_whisper_api_unavailable_without_license() {
+        let result = is_provider_available(
+            &TranscriptionProvider::WhisperApi,
+            Some("dg_key"),
+            None, // No license
+            false,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_whisper_local_available_with_license_and_model() {
+        let result = is_provider_available(
+            &TranscriptionProvider::WhisperLocal,
+            None,
+            Some("license_key"),
+            true, // Model downloaded
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_whisper_local_unavailable_without_model() {
+        let result = is_provider_available(
+            &TranscriptionProvider::WhisperLocal,
+            None,
+            Some("license_key"),
+            false, // Model not downloaded
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_whisper_local_unavailable_without_license() {
+        let result = is_provider_available(
+            &TranscriptionProvider::WhisperLocal,
+            None,
+            None, // No license
+            true,
+        );
+        assert!(!result);
+    }
+
+    // ==================== get_best_provider Tests ====================
+
+    #[test]
+    fn test_subscription_takes_highest_priority() {
+        let result = get_best_provider(
+            true,  // has_subscription
+            true,  // has_lifetime
+            true,  // model_downloaded
+            Some("dg_key"),
+        );
+        assert_eq!(result, Some(TranscriptionProvider::WhisperApi));
+    }
+
+    #[test]
+    fn test_lifetime_with_model_second_priority() {
+        let result = get_best_provider(
+            false, // no subscription
+            true,  // has_lifetime
+            true,  // model_downloaded
+            Some("dg_key"),
+        );
+        assert_eq!(result, Some(TranscriptionProvider::WhisperLocal));
+    }
+
+    #[test]
+    fn test_lifetime_without_model_falls_to_deepgram() {
+        let result = get_best_provider(
+            false, // no subscription
+            true,  // has_lifetime
+            false, // model NOT downloaded
+            Some("dg_key"),
+        );
+        assert_eq!(result, Some(TranscriptionProvider::Deepgram));
+    }
+
+    #[test]
+    fn test_deepgram_is_fallback() {
+        let result = get_best_provider(
+            false, // no subscription
+            false, // no lifetime
+            false, // no model
+            Some("dg_key"),
+        );
+        assert_eq!(result, Some(TranscriptionProvider::Deepgram));
+    }
+
+    #[test]
+    fn test_no_provider_available() {
+        let result = get_best_provider(
+            false, // no subscription
+            false, // no lifetime
+            false, // no model
+            None,  // no deepgram key
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_subscription_only() {
+        let result = get_best_provider(
+            true,  // has_subscription only
+            false,
+            false,
+            None,
+        );
+        assert_eq!(result, Some(TranscriptionProvider::WhisperApi));
+    }
+
+    #[test]
+    fn test_lifetime_only_with_model() {
+        let result = get_best_provider(
+            false,
+            true,  // lifetime only
+            true,  // with model
+            None,
+        );
+        assert_eq!(result, Some(TranscriptionProvider::WhisperLocal));
+    }
+
+    #[test]
+    fn test_lifetime_only_without_model_no_fallback() {
+        let result = get_best_provider(
+            false,
+            true,  // lifetime only
+            false, // without model
+            None,  // no deepgram
+        );
+        // Lifetime without model and no deepgram = no provider
+        assert_eq!(result, None);
+    }
+
+    // ==================== TranscriptionResult Tests ====================
+
+    #[test]
+    fn test_transcription_result_creation() {
+        let result = TranscriptionResult {
+            transcript: "Hello world".to_string(),
+            provider: TranscriptionProvider::Deepgram,
+        };
+        assert_eq!(result.transcript, "Hello world");
+        assert_eq!(result.provider, TranscriptionProvider::Deepgram);
+    }
+}

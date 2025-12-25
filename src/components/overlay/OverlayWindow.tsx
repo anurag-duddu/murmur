@@ -152,7 +152,7 @@ export function OverlayWindow() {
 
   return (
     <div className="flex h-full w-full items-center justify-center">
-      <div ref={containerRef} className="w-fit">
+      <div ref={containerRef} className="w-fit overlay-pill-container">
         <OverlayPill
           state={overlayState.state}
           mode={overlayState.mode}

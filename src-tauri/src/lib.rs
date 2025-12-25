@@ -1258,54 +1258,87 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
         return;
     }
 
-    // Capture context BEFORE showing overlay (while original app has focus)
-    // These are quick calls (~10-30ms total) that must happen before overlay steals focus
+    // =========================================================================
+    // INSTANT OVERLAY ARCHITECTURE
+    // =========================================================================
+    // The Accessibility API (get_selected_text) can take 500ms-1s+ depending
+    // on the target app. To ensure instant overlay response:
+    //
+    // 1. Capture active app ONLY before overlay (fast: ~10-20ms via lsappinfo)
+    // 2. Show overlay IMMEDIATELY (user sees instant feedback)
+    // 3. Capture selection ASYNC in background thread
+    // 4. Selection detection completes while user speaks (~1-5 seconds)
+    // 5. Command Mode is ready by the time recording stops
+    // =========================================================================
 
-    // 1. Capture active app
+    let hotkey_start = std::time::Instant::now();
+
+    // 1. Capture active app (fast: ~10-20ms via lsappinfo)
     let active_app_before_overlay = styles::detection::get_active_app();
     println!(
-        "Active app captured: {:?}",
+        "[TIMING] get_active_app: {:?} - bundle: {:?}",
+        hotkey_start.elapsed(),
         active_app_before_overlay.as_ref().map(|a| &a.bundle_id)
     );
 
-    // 2. Capture selection (for Command Mode detection)
-    let selection_before_overlay = platform::selection::get_selected_text().ok();
-    let has_selection = selection_before_overlay.is_some();
-    println!(
-        "Selection captured: {} chars",
-        selection_before_overlay.as_ref().map(|s| s.len()).unwrap_or(0)
-    );
-
     // =========================================================================
-    // PHASE 1: INSTANT RESPONSE (no blocking operations)
+    // PHASE 1: INSTANT RESPONSE - Show overlay NOW
     // =========================================================================
 
-    // Set state to Recording immediately
-    // Mode is set based on whether we captured a selection
+    // Default to Dictation mode (switches to Command when selection detected)
     state.set_state(RecordingState::Recording);
-    if has_selection {
-        state.set_mode(DictationMode::Command);
-        state.set_selected_text(selection_before_overlay.clone());
-    } else {
-        state.set_mode(DictationMode::Dictation);
-    }
+    state.set_mode(DictationMode::Dictation);
     if let Ok(mut start) = state.recording_start.lock() {
         *start = Some(std::time::Instant::now());
     }
 
-    // Show overlay IMMEDIATELY - no delay, no blocking calls before this
+    // Show overlay IMMEDIATELY - no blocking operations before this
     if let Some(overlay) = app_handle.get_webview_window("overlay") {
         position_overlay_center_bottom(&overlay, 300);
         let _ = overlay.show();
     }
+    println!("[TIMING] Hotkey-to-overlay: {:?}", hotkey_start.elapsed());
 
-    // Emit initial state with correct mode
-    let initial_status = if has_selection {
-        "Command Mode".to_string()
-    } else {
-        "Recording...".to_string()
-    };
-    emit_state_change(app_handle, &state, Some(initial_status));
+    // Emit initial state (Dictation mode)
+    emit_state_change(app_handle, &state, Some("Recording...".to_string()));
+
+    // =========================================================================
+    // PHASE 2: ASYNC SELECTION DETECTION (while user speaks)
+    // =========================================================================
+    // Selection detection can take 500ms-1s+ but user speaks for 1-5+ seconds
+    // So selection will be ready before recording stops
+
+    let app_handle_for_selection = app_handle.clone();
+    std::thread::spawn(move || {
+        let state: tauri::State<'_, AppState> = app_handle_for_selection.state();
+
+        // Only proceed if we're still recording
+        if state.get_state() != RecordingState::Recording {
+            return;
+        }
+
+        let selection_start = std::time::Instant::now();
+        let selection = platform::selection::get_selected_text().ok();
+        println!(
+            "[TIMING] get_selected_text (async): {:?} - {} chars",
+            selection_start.elapsed(),
+            selection.as_ref().map(|s| s.len()).unwrap_or(0)
+        );
+
+        if let Some(text) = selection {
+            // Check if still recording before switching mode
+            if state.get_state() == RecordingState::Recording {
+                state.set_mode(DictationMode::Command);
+                state.set_selected_text(Some(text));
+                emit_state_change(
+                    &app_handle_for_selection,
+                    &state,
+                    Some("Command Mode".to_string()),
+                );
+                println!("[MODE] Switched to Command Mode");
+            }
+        }
+    });
 
     // Start audio capture IMMEDIATELY
     let result = {
@@ -1892,8 +1925,10 @@ pub fn run() {
                 let _ = window.hide();
             }
 
-            // Hide overlay on start
+            // Pre-position overlay at bottom-center (while hidden)
+            // This prevents flash when first shown
             if let Some(overlay) = app.get_webview_window("overlay") {
+                position_overlay_center_bottom(&overlay, 300);
                 let _ = overlay.hide();
             }
 

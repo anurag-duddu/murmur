@@ -6,16 +6,9 @@ export interface Preferences {
   play_sounds: boolean;
   microphone: string;
   language: string;
-  deepgram_api_key: string;
-  groq_api_key: string;
-  anthropic_api_key: string;
-  transcription_provider: TranscriptionProvider;
-  license_key: string | null;
   onboarding_complete: boolean;
   spoken_languages: string[];
 }
-
-export type TranscriptionProvider = "deepgram" | "whisperapi" | "whisperlocal";
 
 export const DEFAULT_PREFERENCES: Preferences = {
   recording_mode: "toggle",
@@ -24,11 +17,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   play_sounds: true,
   microphone: "default",
   language: "en-US",
-  deepgram_api_key: "",
-  groq_api_key: "",
-  anthropic_api_key: "",
-  transcription_provider: "deepgram",
-  license_key: null,
   onboarding_complete: false,
   spoken_languages: ["en"],
 };

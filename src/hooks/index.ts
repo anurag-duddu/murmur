@@ -4,8 +4,6 @@ export { useRecordingState } from "./useRecordingState";
 export { useAudioLevel } from "./useAudioLevel";
 export { useTimer } from "./useTimer";
 export { usePermissions } from "./usePermissions";
-export { useModelStatus } from "./useModelStatus";
-export { useLicenseInfo } from "./useLicenseInfo";
 
 // GSAP animation hooks
 export {

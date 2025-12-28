@@ -50,6 +50,7 @@ pub fn get_transcription_client() -> Result<&'static Client, String> {
 
 /// Create a secure HTTP client with TLS validation.
 /// Note: Prefer get_client() for connection reuse.
+#[allow(dead_code)]
 pub fn create_secure_client() -> Result<Client, String> {
     Client::builder()
         .use_native_tls()
@@ -61,6 +62,7 @@ pub fn create_secure_client() -> Result<Client, String> {
 
 /// Create a secure HTTP client with a custom timeout.
 /// Note: Prefer get_transcription_client() for transcription requests.
+#[allow(dead_code)]
 pub fn create_secure_client_with_timeout(timeout_secs: u64) -> Result<Client, String> {
     Client::builder()
         .use_native_tls()

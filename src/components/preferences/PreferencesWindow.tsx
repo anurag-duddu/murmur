@@ -1,12 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GeneralTab } from "./GeneralTab";
-import { TranscriptionTab } from "./TranscriptionTab";
 import { AudioTab } from "./AudioTab";
-import { ApiTab } from "./ApiTab";
 import { StickyActionBar } from "./StickyActionBar";
 import { usePreferences, useEntranceAnimation } from "@/hooks";
-import { Settings, Mic, Key, Volume2, Sparkles } from "lucide-react";
+import { Settings, Volume2, Sparkles } from "lucide-react";
 import gsap from "gsap";
 
 export function PreferencesWindow() {
@@ -123,25 +121,11 @@ export function PreferencesWindow() {
                 <span className="hidden xs:inline">General</span>
               </TabsTrigger>
               <TabsTrigger
-                value="transcription"
-                className="flex-1 sm:flex-none gap-2 rounded-lg px-3 sm:px-4 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-white/[0.06] data-[state=active]:text-foreground data-[state=active]:shadow-sm hover:text-foreground hover:bg-white/[0.03]"
-              >
-                <Mic className="h-4 w-4" />
-                <span className="hidden xs:inline">Transcription</span>
-              </TabsTrigger>
-              <TabsTrigger
                 value="audio"
                 className="flex-1 sm:flex-none gap-2 rounded-lg px-3 sm:px-4 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-white/[0.06] data-[state=active]:text-foreground data-[state=active]:shadow-sm hover:text-foreground hover:bg-white/[0.03]"
               >
                 <Volume2 className="h-4 w-4" />
                 <span className="hidden xs:inline">Audio</span>
-              </TabsTrigger>
-              <TabsTrigger
-                value="api"
-                className="flex-1 sm:flex-none gap-2 rounded-lg px-3 sm:px-4 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-white/[0.06] data-[state=active]:text-foreground data-[state=active]:shadow-sm hover:text-foreground hover:bg-white/[0.03]"
-              >
-                <Key className="h-4 w-4" />
-                <span className="hidden xs:inline">API Keys</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -156,22 +140,8 @@ export function PreferencesWindow() {
                 />
               </TabsContent>
 
-              <TabsContent value="transcription" className="mt-0">
-                <TranscriptionTab
-                  preferences={preferences}
-                  onUpdate={updatePreference}
-                />
-              </TabsContent>
-
               <TabsContent value="audio" className="mt-0">
                 <AudioTab
-                  preferences={preferences}
-                  onUpdate={updatePreference}
-                />
-              </TabsContent>
-
-              <TabsContent value="api" className="mt-0">
-                <ApiTab
                   preferences={preferences}
                   onUpdate={updatePreference}
                 />

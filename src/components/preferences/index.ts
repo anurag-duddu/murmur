@@ -1,9 +1,4 @@
 export { PreferencesWindow } from "./PreferencesWindow";
 export { GeneralTab } from "./GeneralTab";
-export { TranscriptionTab } from "./TranscriptionTab";
 export { AudioTab } from "./AudioTab";
-export { ApiTab } from "./ApiTab";
-export { ProviderCard } from "./ProviderCard";
-export { LicenseSection } from "./LicenseSection";
-export { ModelSection } from "./ModelSection";
 export { StickyActionBar } from "./StickyActionBar";

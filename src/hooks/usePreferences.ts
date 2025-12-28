@@ -16,11 +16,6 @@ function preferencesEqual(a: Preferences, b: Preferences): boolean {
     a.play_sounds !== b.play_sounds ||
     a.microphone !== b.microphone ||
     a.language !== b.language ||
-    a.deepgram_api_key !== b.deepgram_api_key ||
-    a.groq_api_key !== b.groq_api_key ||
-    a.anthropic_api_key !== b.anthropic_api_key ||
-    a.transcription_provider !== b.transcription_provider ||
-    a.license_key !== b.license_key ||
     a.onboarding_complete !== b.onboarding_complete
   ) {
     return false;

@@ -221,3 +221,29 @@ pub fn set_selected_microphone(device_id: &str) -> Result<(), String> {
 
     Ok(())
 }
+
+/// Get the selected microphone device name
+/// Returns None if no device is selected or "default" is selected
+pub fn get_selected_microphone_name() -> Option<String> {
+    let config_dir = dirs::config_dir()?.join("murmur");
+    let mic_file = config_dir.join("selected_microphone");
+
+    if !mic_file.exists() {
+        return None;
+    }
+
+    let device_id = std::fs::read_to_string(&mic_file).ok()?;
+    let device_id = device_id.trim();
+
+    if device_id.is_empty() || device_id == "default" {
+        return None;
+    }
+
+    // The device_id is something like "device_0", "device_1", etc.
+    // We need to find the corresponding device name
+    let devices = get_microphone_devices();
+    devices
+        .into_iter()
+        .find(|d| d.id == device_id)
+        .map(|d| d.name)
+}

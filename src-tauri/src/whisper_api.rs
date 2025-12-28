@@ -11,8 +11,13 @@ use any_ascii::any_ascii;
 use reqwest::{multipart, Client};
 use serde::Deserialize;
 
-const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
+/// Proxy URL for production (keeps API key server-side)
+const PROXY_URL: &str = "https://murmur-proxy.anurag-ebc.workers.dev/whisper";
+/// Direct API URL for development fallback
+const DIRECT_API_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const WHISPER_MODEL: &str = "whisper-large-v3-turbo";
+/// App signature for proxy authentication (prevents unauthorized proxy usage)
+const APP_SIGNATURE: &str = "d8a30062682b1fb12471dfd838779a7b6047e04a54e8ce0d440db87c50eb2411";
 
 /// Response from Groq Whisper API (simple format)
 #[derive(Debug, Deserialize)]
@@ -72,16 +77,16 @@ impl WhisperApiClient {
 
         println!("Sending audio to Groq Whisper API ({} bytes)...", audio_wav.len());
 
-        let api_key = self.get_api_key()?;
+        let (api_url, api_key) = self.get_api_config();
 
         // Handle "auto" as mixed mode (legacy support for old stored preferences)
         let is_mixed_mode = language == "mixed" || language == "auto";
         let lang_code = language.split('-').next().unwrap_or(language);
 
         if is_mixed_mode {
-            self.transcribe_mixed_mode(audio_wav, &api_key, spoken_languages).await
+            self.transcribe_mixed_mode(audio_wav, &api_url, api_key.as_deref(), spoken_languages).await
         } else {
-            self.transcribe_native_mode(audio_wav, &api_key, lang_code).await
+            self.transcribe_native_mode(audio_wav, &api_url, api_key.as_deref(), lang_code).await
         }
     }
 
@@ -90,7 +95,8 @@ impl WhisperApiClient {
     async fn transcribe_native_mode(
         &self,
         audio_wav: &[u8],
-        api_key: &str,
+        api_url: &str,
+        api_key: Option<&str>,
         lang_code: &str,
     ) -> Result<String, String> {
         println!("Native mode: strict {} transcription", lang_code);
@@ -123,11 +129,18 @@ impl WhisperApiClient {
             form = form.text("prompt", p);
         }
 
-        let response = self
-            .client
-            .post(GROQ_API_URL)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .multipart(form)
+        let mut request = self.client.post(api_url).multipart(form);
+
+        // Add Authorization header only for direct API (dev mode)
+        // Add app signature for proxy mode
+        if let Some(key) = api_key {
+            request = request.header("Authorization", format!("Bearer {}", key));
+        } else {
+            // Production mode: add app signature for proxy authentication
+            request = request.header("X-Murmur-Signature", APP_SIGNATURE);
+        }
+
+        let response = request
             .send()
             .await
             .map_err(|e| format!("Failed to send request to Groq: {}", e))?;
@@ -157,7 +170,8 @@ impl WhisperApiClient {
     async fn transcribe_mixed_mode(
         &self,
         audio_wav: &[u8],
-        api_key: &str,
+        api_url: &str,
+        api_key: Option<&str>,
         spoken_languages: &[String],
     ) -> Result<String, String> {
         println!("Mixed mode: detecting among {:?}", spoken_languages);
@@ -185,11 +199,18 @@ impl WhisperApiClient {
             .text("prompt", prompt);
         // Note: Not setting "language" parameter - let Whisper auto-detect
 
-        let response = self
-            .client
-            .post(GROQ_API_URL)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .multipart(form)
+        let mut request = self.client.post(api_url).multipart(form);
+
+        // Add Authorization header only for direct API (dev mode)
+        // Add app signature for proxy mode
+        if let Some(key) = api_key {
+            request = request.header("Authorization", format!("Bearer {}", key));
+        } else {
+            // Production mode: add app signature for proxy authentication
+            request = request.header("X-Murmur-Signature", APP_SIGNATURE);
+        }
+
+        let response = request
             .send()
             .await
             .map_err(|e| format!("Failed to send request to Groq: {}", e))?;
@@ -251,21 +272,22 @@ impl WhisperApiClient {
         Ok(romanized)
     }
 
-    /// Get the Groq API key from environment or stored key
-    fn get_api_key(&self) -> Result<String, String> {
-        // First check environment variable
+    /// Get the API URL and optional API key
+    /// Returns (url, Option<api_key>)
+    /// - If GROQ_API_KEY env var is set, use direct API with that key (dev mode)
+    /// - Otherwise, use proxy (production mode, no key needed)
+    fn get_api_config(&self) -> (String, Option<String>) {
+        // Check for dev mode: GROQ_API_KEY env var
         if let Ok(key) = std::env::var("GROQ_API_KEY") {
             if !key.is_empty() {
-                return Ok(key);
+                println!("Using direct Groq API (dev mode)");
+                return (DIRECT_API_URL.to_string(), Some(key));
             }
         }
 
-        // Use the provided API key
-        if !self.api_key.is_empty() {
-            Ok(self.api_key.clone())
-        } else {
-            Err("No Groq API key configured. Set GROQ_API_KEY environment variable.".to_string())
-        }
+        // Production mode: use proxy (no API key needed client-side)
+        println!("Using proxy (production mode)");
+        (PROXY_URL.to_string(), None)
     }
 }
 

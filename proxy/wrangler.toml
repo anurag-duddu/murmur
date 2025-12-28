@@ -1,0 +1,10 @@
+name = "murmur-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+workers_dev = true
+
+[vars]
+# Non-secret config (secrets are set via `wrangler secret put`)
+
+# Uncomment to restrict to specific user IDs (comma-separated)
+# ALLOWED_USERS = "user1,user2,user3"

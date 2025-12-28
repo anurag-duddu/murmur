@@ -94,22 +94,27 @@ fn escape_applescript(text: &str) -> String {
 ### 2.2 Explicit TLS Validation
 - [x] **Files:** `http_client.rs` (new), `claude.rs`, `deepgram.rs`, `whisper_api.rs`, `groq_llm.rs`, `licensing.rs`
 - [x] **Issue:** HTTP clients lack explicit TLS configuration
-- [x] **Action:** Create shared `http_client.rs` module with TLS settings (rustls)
+- [x] **Action:** Create shared `http_client.rs` module with TLS settings
 - [x] **Action:** Update all API clients to use shared builder
-- [x] **Action:** Added `rustls-tls` feature to reqwest
-- [ ] **Test:** Verify all API calls work with new client (manual)
+- [x] **Action:** Using `native-tls` feature (macOS Security.framework) for performance
+- [x] **Action:** Added global cached clients for connection reuse
+- [x] **Test:** Verify all API calls work with new client (manual) ✅
 - [x] **Test:** HTTPS-only enforcement test added
 
-**Shared client to create:**
+**Note:** Initially used rustls but switched to native-tls (2025-12-28) for better performance
+on macOS. Native TLS uses the platform's certificate store and is optimized for the OS.
+
+**Shared client implementation:**
 ```rust
-pub fn create_secure_client() -> Result<Client, String> {
-    Client::builder()
-        .use_rustls_tls()
-        .tls_built_in_root_certs(true)
-        .https_only(true)
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))
+pub fn get_client() -> Result<&'static Client, String> {
+    Ok(CACHED_CLIENT.get_or_init(|| {
+        Client::builder()
+            .use_native_tls()
+            .https_only(true)
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("Failed to create HTTP client")
+    }))
 }
 ```
 

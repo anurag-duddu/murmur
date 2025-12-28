@@ -8,8 +8,13 @@ use crate::rate_limit::{check_rate_limit, Service};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-const GROQ_CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
+/// Proxy URL for production (keeps API key server-side)
+const PROXY_URL: &str = "https://murmur-proxy.anurag-ebc.workers.dev/chat";
+/// Direct API URL for development fallback
+const DIRECT_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL: &str = "llama-3.3-70b-versatile";
+/// App signature for proxy authentication (prevents unauthorized proxy usage)
+const APP_SIGNATURE: &str = "d8a30062682b1fb12471dfd838779a7b6047e04a54e8ce0d440db87c50eb2411";
 
 /// User intent when text is selected
 #[derive(Debug, Clone, PartialEq)]
@@ -150,21 +155,20 @@ impl GroqLlmClient {
         })
     }
 
-    /// Get the API key from environment or stored key
-    fn get_api_key(&self) -> Result<String, String> {
-        // First check environment variable
+    /// Get the API URL and optional API key
+    /// Returns (url, Option<api_key>)
+    /// - If GROQ_API_KEY env var is set, use direct API with that key (dev mode)
+    /// - Otherwise, use proxy (production mode, no key needed)
+    fn get_api_config(&self) -> (String, Option<String>) {
+        // Check for dev mode: GROQ_API_KEY env var
         if let Ok(key) = std::env::var("GROQ_API_KEY") {
             if !key.is_empty() {
-                return Ok(key);
+                return (DIRECT_API_URL.to_string(), Some(key));
             }
         }
 
-        // Use the provided API key
-        if !self.api_key.is_empty() {
-            Ok(self.api_key.clone())
-        } else {
-            Err("No Groq API key configured. Set GROQ_API_KEY environment variable.".to_string())
-        }
+        // Production mode: use proxy (no API key needed client-side)
+        (PROXY_URL.to_string(), None)
     }
 
     /// Classify user intent: is this a command to transform text, or new content?
@@ -185,7 +189,7 @@ impl GroqLlmClient {
         #[cfg(debug_assertions)]
         println!("Classifying intent for: {}", transcription);
 
-        let api_key = self.get_api_key()?;
+        let (api_url, api_key) = self.get_api_config();
 
         let request = ChatRequest {
             model: GROQ_MODEL.to_string(),
@@ -203,7 +207,7 @@ impl GroqLlmClient {
             max_tokens: 10,   // Only need one word
         };
 
-        let result = self.send_request(&api_key, &request).await?;
+        let result = self.send_request(&api_url, api_key.as_deref(), &request).await?;
         let result_upper = result.to_uppercase();
 
         let intent = if result_upper.contains("COMMAND") {
@@ -239,7 +243,7 @@ impl GroqLlmClient {
             println!("Command: {}", command);
         }
 
-        let api_key = self.get_api_key()?;
+        let (api_url, api_key) = self.get_api_config();
 
         let user_message = format!(
             "SELECTED TEXT:\n\"\"\"\n{}\n\"\"\"\n\nCOMMAND: \"{}\"",
@@ -262,7 +266,7 @@ impl GroqLlmClient {
             max_tokens: 4096,
         };
 
-        self.send_request(&api_key, &request).await
+        self.send_request(&api_url, api_key.as_deref(), &request).await
     }
 
     /// Enhance a transcription for Dictation Mode
@@ -283,7 +287,7 @@ impl GroqLlmClient {
 
         println!("Enhancing text with Groq LLM...");
 
-        let api_key = self.get_api_key()?;
+        let (api_url, api_key) = self.get_api_config();
 
         // Build system prompt with optional style guidance
         let system_prompt = match style_prompt {
@@ -310,21 +314,32 @@ impl GroqLlmClient {
             max_tokens: 4096,
         };
 
-        self.send_request(&api_key, &request).await
+        self.send_request(&api_url, api_key.as_deref(), &request).await
     }
 
-    /// Send a request to the Groq API
+    /// Send a request to the Groq API (or proxy)
     async fn send_request(
         &self,
-        api_key: &str,
+        api_url: &str,
+        api_key: Option<&str>,
         request: &ChatRequest,
     ) -> Result<String, String> {
-        let response = self
+        let mut http_request = self
             .client
-            .post(GROQ_CHAT_URL)
-            .header("Authorization", format!("Bearer {}", api_key))
+            .post(api_url)
             .header("Content-Type", "application/json")
-            .json(request)
+            .json(request);
+
+        // Add Authorization header only for direct API (dev mode)
+        // Add app signature for proxy mode
+        if let Some(key) = api_key {
+            http_request = http_request.header("Authorization", format!("Bearer {}", key));
+        } else {
+            // Production mode: add app signature for proxy authentication
+            http_request = http_request.header("X-Murmur-Signature", APP_SIGNATURE);
+        }
+
+        let response = http_request
             .send()
             .await
             .map_err(|e| format!("Failed to send request to Groq: {}", e))?;

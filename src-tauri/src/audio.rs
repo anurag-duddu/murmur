@@ -29,8 +29,20 @@ impl AudioRecorder {
         }
     }
 
+    #[allow(dead_code)]
     pub fn start_recording(&mut self, app_handle: AppHandle) -> Result<(), String> {
+        self.start_recording_with_device(app_handle, None)
+    }
+
+    pub fn start_recording_with_device(
+        &mut self,
+        app_handle: AppHandle,
+        device_name: Option<String>,
+    ) -> Result<(), String> {
         println!("Starting audio recording...");
+        if let Some(ref name) = device_name {
+            println!("Using selected device: {}", name);
+        }
 
         // Clear previous audio data
         if let Ok(mut data) = self.audio_data.lock() {
@@ -49,7 +61,8 @@ impl AudioRecorder {
 
         // Spawn audio capture thread
         std::thread::spawn(move || {
-            if let Err(e) = Self::capture_audio(audio_data, is_recording, recent_samples, app_handle)
+            if let Err(e) =
+                Self::capture_audio(audio_data, is_recording, recent_samples, app_handle, device_name)
             {
                 eprintln!("Audio capture error: {}", e);
             }
@@ -180,11 +193,36 @@ impl AudioRecorder {
         is_recording: Arc<AtomicBool>,
         recent_samples: Arc<Mutex<Vec<f32>>>,
         app_handle: AppHandle,
+        device_name: Option<String>,
     ) -> Result<(), String> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or("No input device available")?;
+
+        // Find the device by name, or fall back to default
+        let device = if let Some(ref name) = device_name {
+            // Try to find the device by name
+            let found_device = host
+                .input_devices()
+                .ok()
+                .and_then(|mut devices| devices.find(|d| d.name().ok().as_ref() == Some(name)));
+
+            match found_device {
+                Some(d) => {
+                    println!("Found selected device: {}", name);
+                    d
+                }
+                None => {
+                    println!(
+                        "Selected device '{}' not found, falling back to default",
+                        name
+                    );
+                    host.default_input_device()
+                        .ok_or("No input device available")?
+                }
+            }
+        } else {
+            host.default_input_device()
+                .ok_or("No input device available")?
+        };
 
         println!("Using input device: {}", device.name().unwrap_or_default());
 

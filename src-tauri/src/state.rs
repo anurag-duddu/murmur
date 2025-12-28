@@ -123,46 +123,10 @@ impl ErrorEvent {
         }
     }
 
-    pub fn deepgram_error(msg: &str) -> Self {
-        ErrorEvent {
-            code: "DEEPGRAM_ERROR".to_string(),
-            message: format!("Transcription failed: {}", msg),
-            recoverable: true,
-            fallback_text: None,
-        }
-    }
-
-    pub fn claude_error(msg: &str, fallback: Option<String>) -> Self {
-        ErrorEvent {
-            code: "CLAUDE_ERROR".to_string(),
-            message: format!("Enhancement failed: {}", msg),
-            recoverable: true,
-            fallback_text: fallback,
-        }
-    }
-
     pub fn whisper_error(msg: &str) -> Self {
         ErrorEvent {
             code: "WHISPER_ERROR".to_string(),
             message: format!("Transcription failed: {}", msg),
-            recoverable: true,
-            fallback_text: None,
-        }
-    }
-
-    pub fn model_not_loaded() -> Self {
-        ErrorEvent {
-            code: "MODEL_NOT_LOADED".to_string(),
-            message: "Whisper model not loaded. Please download a model in settings.".to_string(),
-            recoverable: true,
-            fallback_text: None,
-        }
-    }
-
-    pub fn no_transcription_provider() -> Self {
-        ErrorEvent {
-            code: "NO_TRANSCRIPTION_PROVIDER".to_string(),
-            message: "No transcription provider configured. Please set up Deepgram API key or activate a license.".to_string(),
             recoverable: true,
             fallback_text: None,
         }
@@ -397,47 +361,10 @@ mod tests {
     }
 
     #[test]
-    fn test_error_event_deepgram_error() {
-        let event = ErrorEvent::deepgram_error("API timeout");
-        assert_eq!(event.code, "DEEPGRAM_ERROR");
-        assert!(event.message.contains("API timeout"));
-        assert!(event.recoverable);
-    }
-
-    #[test]
-    fn test_error_event_claude_error_with_fallback() {
-        let event = ErrorEvent::claude_error("Rate limited", Some("raw text".to_string()));
-        assert_eq!(event.code, "CLAUDE_ERROR");
-        assert!(event.message.contains("Rate limited"));
-        assert_eq!(event.fallback_text, Some("raw text".to_string()));
-    }
-
-    #[test]
-    fn test_error_event_claude_error_without_fallback() {
-        let event = ErrorEvent::claude_error("API error", None);
-        assert_eq!(event.code, "CLAUDE_ERROR");
-        assert!(event.fallback_text.is_none());
-    }
-
-    #[test]
     fn test_error_event_whisper_error() {
         let event = ErrorEvent::whisper_error("Model inference failed");
         assert_eq!(event.code, "WHISPER_ERROR");
         assert!(event.message.contains("Model inference failed"));
-    }
-
-    #[test]
-    fn test_error_event_model_not_loaded() {
-        let event = ErrorEvent::model_not_loaded();
-        assert_eq!(event.code, "MODEL_NOT_LOADED");
-        assert!(event.message.contains("not loaded"));
-    }
-
-    #[test]
-    fn test_error_event_no_transcription_provider() {
-        let event = ErrorEvent::no_transcription_provider();
-        assert_eq!(event.code, "NO_TRANSCRIPTION_PROVIDER");
-        assert!(event.message.contains("No transcription provider"));
     }
 
     #[test]

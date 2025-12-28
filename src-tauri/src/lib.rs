@@ -8,28 +8,20 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod audio;
-mod claude;
 mod config;
-mod deepgram;
 mod error;
 mod groq_llm;
 mod http_client;
 mod ide;
-mod licensing;
-mod model_manager;
 mod permissions;
 mod platform;
 mod rate_limit;
-mod secure_storage;
 mod state;
 mod styles;
 mod whisper_api;
-mod whisper_local;
 
 use audio::{encode_samples_to_wav, AudioRecorder};
-use claude::ClaudeClient;
-use config::{AppConfig, TranscriptionProvider};
-use deepgram::DeepgramClient;
+use config::AppConfig;
 use groq_llm::{GroqLlmClient, UserIntent};
 use state::{DictationMode, ErrorEvent, RecordingState, StateChangeEvent, TranscriptionCompleteEvent};
 
@@ -293,7 +285,8 @@ async fn start_recording(app_handle: AppHandle, state: State<'_, AppState>) -> R
             .recorder
             .lock()
             .map_err(|e| format!("Failed to lock recorder: {}", e))?;
-        recorder.start_recording(app_handle.clone())
+        let selected_mic = permissions::get_selected_microphone_name();
+        recorder.start_recording_with_device(app_handle.clone(), selected_mic)
     };
 
     if let Err(e) = result {
@@ -381,11 +374,7 @@ async fn stop_recording(app_handle: AppHandle, state: State<'_, AppState>) -> Re
 
 /// Configuration extracted from app state for recording stop processing
 struct RecordingStopConfig {
-    provider: TranscriptionProvider,
-    deepgram_key: Option<String>,
     groq_key: Option<String>,
-    anthropic_key: Option<String>,
-    claude_model: String,
     language: String,
     spoken_languages: Vec<String>,
 }
@@ -407,91 +396,39 @@ async fn process_recording_stop(
         .unwrap_or_else(|| vec!["en".to_string()]);
 
     let config = state.with_config(|cfg| RecordingStopConfig {
-        provider: cfg.transcription_provider.clone(),
-        deepgram_key: cfg.deepgram_api_key.clone(),
         groq_key: cfg.groq_api_key.clone(),
-        anthropic_key: cfg.anthropic_api_key.clone(),
-        claude_model: cfg.claude_model.clone(),
         language: cfg.language.clone(),
         spoken_languages: spoken_langs,
     })?;
 
-    // Stop recording and get audio data
-    let provider = config.provider.clone();
-    let (audio_wav, audio_samples_16khz) = state.with_recorder_mut(|recorder| {
-        match provider {
-            TranscriptionProvider::Deepgram => {
-                let wav = recorder.stop_recording()?;
-                Ok::<_, String>((wav, Vec::new()))
-            }
-            TranscriptionProvider::WhisperApi | TranscriptionProvider::WhisperLocal => {
-                let samples = recorder.stop_recording_for_whisper()?;
-                Ok::<_, String>((Vec::new(), samples))
-            }
-        }
+    // Stop recording and get audio data (always use Whisper format)
+    let audio_samples_16khz = state.with_recorder_mut(|recorder| {
+        recorder.stop_recording_for_whisper()
     })??;
 
     // Check if we have audio
-    let has_audio = match config.provider {
-        TranscriptionProvider::Deepgram => !audio_wav.is_empty(),
-        _ => !audio_samples_16khz.is_empty(),
-    };
-
-    if !has_audio {
+    if audio_samples_16khz.is_empty() {
         state.set_state(RecordingState::Error);
         emit_error(app_handle, ErrorEvent::no_audio_captured());
         hide_overlay(app_handle);
         return Err("No audio captured".to_string());
     }
 
-    // Transcribe using the configured provider
+    // Transcribe using Groq Whisper API
     emit_state_change(app_handle, state, Some("Transcribing...".to_string()));
 
-    let transcript = match &config.provider {
-        TranscriptionProvider::Deepgram => {
-            let api_key = config
-                .deepgram_key
-                .clone()
-                .ok_or("Deepgram API key not configured")?;
-            let client = DeepgramClient::new(api_key, Some(config.language.clone()))?;
-            client.transcribe_audio(audio_wav).await.map_err(|e| {
-                state.set_state(RecordingState::Error);
-                emit_error(app_handle, ErrorEvent::deepgram_error(&e));
-                hide_overlay(app_handle);
-                e
-            })?
-        }
-        TranscriptionProvider::WhisperApi => {
-            let wav = encode_samples_to_wav(&audio_samples_16khz, 16000)?;
-            let client =
-                whisper_api::WhisperApiClient::new(config.groq_key.clone().unwrap_or_default())?;
-            client
-                .transcribe(&wav, &config.language, &config.spoken_languages)
-                .await
-                .map_err(|e| {
-                    state.set_state(RecordingState::Error);
-                    emit_error(app_handle, ErrorEvent::whisper_error(&e));
-                    hide_overlay(app_handle);
-                    e
-                })?
-        }
-        TranscriptionProvider::WhisperLocal => {
-            if !model_manager::is_model_downloaded() {
-                state.set_state(RecordingState::Error);
-                emit_error(app_handle, ErrorEvent::model_not_loaded());
-                hide_overlay(app_handle);
-                return Err("Whisper model not downloaded".to_string());
-            }
-            whisper_local::WhisperLocalClient::transcribe(&audio_samples_16khz, &config.language)
-                .await
-                .map_err(|e| {
-                    state.set_state(RecordingState::Error);
-                    emit_error(app_handle, ErrorEvent::whisper_error(&e));
-                    hide_overlay(app_handle);
-                    e
-                })?
-        }
-    };
+    let wav = encode_samples_to_wav(&audio_samples_16khz, 16000)?;
+    let client =
+        whisper_api::WhisperApiClient::new(config.groq_key.clone().unwrap_or_default())?;
+    let transcript = client
+        .transcribe(&wav, &config.language, &config.spoken_languages)
+        .await
+        .map_err(|e| {
+            state.set_state(RecordingState::Error);
+            emit_error(app_handle, ErrorEvent::whisper_error(&e));
+            hide_overlay(app_handle);
+            e
+        })?;
 
     if transcript.is_empty() {
         state.set_state(RecordingState::Error);
@@ -501,7 +438,7 @@ async fn process_recording_stop(
     }
 
     #[cfg(debug_assertions)]
-    println!("Transcript ({}): {}", config.provider.to_string(), transcript);
+    println!("Transcript (groq): {}", transcript);
 
     // Apply IDE transformations if we're in a code editor
     let active_bundle_id = state.get_active_bundle_id();
@@ -615,7 +552,7 @@ async fn process_recording_stop(
             }
         }
         DictationMode::Dictation => {
-            // Dictation mode: enhance with Groq (fallback to Claude)
+            // Dictation mode: enhance with Groq
             state.set_state(RecordingState::Enhancing);
             emit_state_change(app_handle, state, Some("Enhancing...".to_string()));
 
@@ -640,48 +577,11 @@ async fn process_recording_stop(
                 Err(groq_error) => {
                     #[cfg(debug_assertions)]
                     println!("Groq enhancement failed: {}", groq_error);
-
-                    // Fallback to Claude if available
-                    if let Some(api_key) = config.anthropic_key.clone() {
-                        match ClaudeClient::new(api_key, Some(config.claude_model.clone())) {
-                            Ok(claude_client) => {
-                                match claude_client.enhance_text(&transcript, style_prompt).await {
-                                    Ok(t) => {
-                                        #[cfg(debug_assertions)]
-                                        println!("Fallback enhanced with Claude: {}", t);
-                                        t
-                                    }
-                                    Err(e) => {
-                                        #[cfg(debug_assertions)]
-                                        println!("Claude fallback also failed: {}", e);
-                                        emit_error(
-                                            app_handle,
-                                            ErrorEvent::groq_error(
-                                                &groq_error,
-                                                Some(transcript.clone()),
-                                            ),
-                                        );
-                                        transcript.clone()
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                #[cfg(debug_assertions)]
-                                println!("Failed to create Claude client: {}", e);
-                                emit_error(
-                                    app_handle,
-                                    ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
-                                );
-                                transcript.clone()
-                            }
-                        }
-                    } else {
-                        emit_error(
-                            app_handle,
-                            ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
-                        );
-                        transcript.clone()
-                    }
+                    emit_error(
+                        app_handle,
+                        ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
+                    );
+                    transcript.clone()
                 }
             }
         }
@@ -799,12 +699,6 @@ async fn get_preferences(state: State<'_, AppState>) -> Result<config::Preferenc
         play_sounds: config.play_sounds,
         microphone: config.microphone.clone(),
         language: config.language.clone(),
-        deepgram_key: config.deepgram_api_key.clone().unwrap_or_default(),
-        anthropic_key: config.anthropic_api_key.clone().unwrap_or_default(),
-        // New: Transcription provider settings
-        transcription_provider: Some(config.transcription_provider.to_string()),
-        license_key: config.license_key.clone(),
-        // Language onboarding - stored in preferences (separate from permission onboarding)
         onboarding_complete: stored.onboarding_complete,
         spoken_languages: stored.spoken_languages,
     })
@@ -865,136 +759,6 @@ fn complete_onboarding(app_handle: AppHandle) -> Result<(), String> {
     }
 
     println!("Onboarding completed, app is ready!");
-    Ok(())
-}
-
-// ============================================================================
-// MODEL AND LICENSE MANAGEMENT COMMANDS
-// ============================================================================
-
-/// Get the status of the Whisper model
-#[tauri::command]
-fn get_model_status() -> model_manager::ModelStatus {
-    model_manager::get_model_status()
-}
-
-/// Download the Whisper model
-#[tauri::command]
-async fn download_model(app_handle: AppHandle) -> Result<String, String> {
-    let path = model_manager::download_model(&app_handle).await?;
-    Ok(path.to_string_lossy().to_string())
-}
-
-/// Delete the downloaded Whisper model
-#[tauri::command]
-fn delete_model() -> Result<(), String> {
-    model_manager::delete_model()
-}
-
-/// Validate a license key
-#[tauri::command]
-async fn validate_license(license_key: String) -> Result<licensing::LicenseInfo, String> {
-    // Input validation: license key must be non-empty and reasonable length
-    let trimmed = license_key.trim();
-    if trimmed.is_empty() {
-        return Err("License key cannot be empty".to_string());
-    }
-    if trimmed.len() > 256 {
-        return Err("License key is too long".to_string());
-    }
-
-    licensing::validate_license(trimmed).await
-}
-
-/// Activate a license key
-#[tauri::command]
-async fn activate_license(
-    state: State<'_, AppState>,
-    license_key: String,
-) -> Result<licensing::LicenseInfo, String> {
-    // Input validation: license key must be non-empty and reasonable length
-    let trimmed = license_key.trim();
-    if trimmed.is_empty() {
-        return Err("License key cannot be empty".to_string());
-    }
-    if trimmed.len() > 256 {
-        return Err("License key is too long".to_string());
-    }
-
-    let info = licensing::activate_license(trimmed).await?;
-
-    // Update config with the license key if valid
-    if info.valid {
-        let mut config = state
-            .config
-            .lock()
-            .map_err(|e| format!("Failed to lock config: {}", e))?;
-
-        config.license_key = Some(trimmed.to_string());
-
-        // Auto-select provider based on license tier
-        match info.tier {
-            licensing::LicenseTier::Subscription => {
-                config.transcription_provider = TranscriptionProvider::WhisperApi;
-            }
-            licensing::LicenseTier::Lifetime => {
-                config.transcription_provider = TranscriptionProvider::WhisperLocal;
-            }
-            _ => {}
-        }
-    }
-
-    Ok(info)
-}
-
-/// Get cached license info
-#[tauri::command]
-fn get_license_info() -> licensing::LicenseInfo {
-    licensing::get_cached_license()
-}
-
-/// Clear/deactivate license
-#[tauri::command]
-fn clear_license() -> Result<(), String> {
-    licensing::clear_license()
-}
-
-/// Get current transcription provider
-#[tauri::command]
-fn get_transcription_provider(state: State<'_, AppState>) -> Result<String, String> {
-    let config = state
-        .config
-        .lock()
-        .map_err(|e| format!("Failed to lock config: {}", e))?;
-
-    Ok(config.transcription_provider.to_string())
-}
-
-/// Set transcription provider
-#[tauri::command]
-fn set_transcription_provider(
-    state: State<'_, AppState>,
-    provider: String,
-) -> Result<(), String> {
-    // Input validation: provider must be a valid option
-    let valid_providers = ["deepgram", "whisperapi", "whisper_api", "whisper-api", "whisperlocal", "whisper_local", "whisper-local"];
-    let provider_lower = provider.to_lowercase();
-    if !valid_providers.contains(&provider_lower.as_str()) {
-        return Err(format!(
-            "Invalid provider '{}'. Valid options: deepgram, whisperapi, whisperlocal",
-            provider
-        ));
-    }
-
-    let mut config = state
-        .config
-        .lock()
-        .map_err(|e| format!("Failed to lock config: {}", e))?;
-
-    config.transcription_provider = TranscriptionProvider::from_string(&provider);
-    #[cfg(debug_assertions)]
-    println!("Transcription provider set to: {:?}", config.transcription_provider);
-
     Ok(())
 }
 
@@ -1664,7 +1428,8 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
                 return;
             }
         };
-        recorder.start_recording(app_handle.clone())
+        let selected_mic = permissions::get_selected_microphone_name();
+        recorder.start_recording_with_device(app_handle.clone(), selected_mic)
     };
 
     if let Err(e) = result {
@@ -1871,16 +1636,6 @@ pub fn run() {
             set_selected_microphone,
             is_onboarding_complete,
             complete_onboarding,
-            // New: Model and license management
-            get_model_status,
-            download_model,
-            delete_model,
-            validate_license,
-            activate_license,
-            get_license_info,
-            clear_license,
-            get_transcription_provider,
-            set_transcription_provider,
             // Workspace index commands
             set_workspace_root,
             get_workspace_status,

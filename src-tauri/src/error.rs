@@ -153,6 +153,7 @@ impl From<AppError> for String {
 
 /// Sanitize an error message by removing potentially sensitive information.
 /// Use this for error messages that will be shown to users or logged.
+#[allow(dead_code)]
 pub fn sanitize_error_message(msg: &str) -> String {
     let mut sanitized = msg.to_string();
 

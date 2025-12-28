@@ -4,11 +4,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   Preferences,
   StateChangeEvent,
-  ModelStatus,
-  LicenseInfo,
   PermissionStatus,
   MicrophoneDevice,
-  ModelDownloadProgress,
   TranscriptionCompleteEvent,
   RecordingErrorEvent,
   AudioLevelEvent,
@@ -47,30 +44,8 @@ export const tauriCommands = {
   isOnboardingComplete: () => invoke<boolean>("is_onboarding_complete"),
   completeOnboarding: () => invoke<void>("complete_onboarding"),
 
-  // Model management
-  getModelStatus: () => invoke<ModelStatus>("get_model_status"),
-  downloadModel: () => invoke<string>("download_model"),
-  deleteModel: () => invoke<void>("delete_model"),
-
-  // License
-  validateLicense: (licenseKey: string) =>
-    invoke<LicenseInfo>("validate_license", { license_key: licenseKey }),
-  activateLicense: (licenseKey: string) =>
-    invoke<LicenseInfo>("activate_license", { license_key: licenseKey }),
-  getLicenseInfo: () => invoke<LicenseInfo>("get_license_info"),
-  clearLicense: () => invoke<void>("clear_license"),
-
-  // Provider
-  getTranscriptionProvider: () => invoke<string>("get_transcription_provider"),
-  setTranscriptionProvider: (provider: string) =>
-    invoke<void>("set_transcription_provider", { provider }),
-
   // Window
   showPreferences: () => invoke<void>("show_preferences"),
-
-  // API Testing
-  testDeepgramKey: (apiKey: string) =>
-    invoke<boolean>("test_deepgram_key", { api_key: apiKey }),
 };
 
 // ============================================================================
@@ -85,16 +60,6 @@ export const tauriEvents = {
   // Audio level for waveform visualization
   onAudioLevel: (callback: (level: number) => void): Promise<UnlistenFn> =>
     listen<AudioLevelEvent>("audio-level", (e) => callback(e.payload.level)),
-
-  // Model download events
-  onModelProgress: (callback: (progress: ModelDownloadProgress) => void): Promise<UnlistenFn> =>
-    listen<ModelDownloadProgress>("model-download-progress", (e) => callback(e.payload)),
-
-  onModelComplete: (callback: (path: string) => void): Promise<UnlistenFn> =>
-    listen<{ path: string }>("model-download-complete", (e) => callback(e.payload.path)),
-
-  onModelError: (callback: (error: string) => void): Promise<UnlistenFn> =>
-    listen<{ error: string }>("model-download-error", (e) => callback(e.payload.error)),
 
   // Transcription events
   onTranscriptionComplete: (callback: (data: TranscriptionCompleteEvent) => void): Promise<UnlistenFn> =>

@@ -22,7 +22,7 @@ impl Default for RateLimitConfig {
         Self {
             max_requests: 10,
             window: Duration::from_secs(60),
-            min_interval: Duration::from_millis(500),
+            min_interval: Duration::from_millis(100),
         }
     }
 }
@@ -39,33 +39,13 @@ impl RateLimitConfig {
         }
     }
 
-    /// LLM enhancement services (Claude, Groq)
-    /// Standard rate to prevent excessive API costs
+    /// LLM enhancement services (Groq)
+    /// Reduced interval for faster response times
     pub fn llm_enhancement() -> Self {
         Self {
             max_requests: 15,
             window: Duration::from_secs(60),
-            min_interval: Duration::from_millis(500),
-        }
-    }
-
-    /// License validation (LemonSqueezy)
-    /// Conservative since validation is infrequent
-    pub fn license_validation() -> Self {
-        Self {
-            max_requests: 5,
-            window: Duration::from_secs(300), // 5 minutes
-            min_interval: Duration::from_secs(10),
-        }
-    }
-
-    /// Model download (HuggingFace)
-    /// Very conservative - should rarely happen
-    pub fn model_download() -> Self {
-        Self {
-            max_requests: 2,
-            window: Duration::from_secs(3600), // 1 hour
-            min_interval: Duration::from_secs(30),
+            min_interval: Duration::from_millis(100),
         }
     }
 }
@@ -160,25 +140,16 @@ impl std::error::Error for RateLimitError {}
 /// Service identifiers for rate limiting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Service {
-    Deepgram,
     WhisperApi,
-    WhisperLocal,
-    Claude,
     Groq,
-    LicenseValidation,
-    ModelDownload,
 }
 
 impl Service {
     /// Get the rate limit configuration for this service
     pub fn config(&self) -> RateLimitConfig {
         match self {
-            Service::Deepgram | Service::WhisperApi | Service::WhisperLocal => {
-                RateLimitConfig::transcription()
-            }
-            Service::Claude | Service::Groq => RateLimitConfig::llm_enhancement(),
-            Service::LicenseValidation => RateLimitConfig::license_validation(),
-            Service::ModelDownload => RateLimitConfig::model_download(),
+            Service::WhisperApi => RateLimitConfig::transcription(),
+            Service::Groq => RateLimitConfig::llm_enhancement(),
         }
     }
 }
@@ -276,11 +247,10 @@ mod tests {
     fn test_rate_limit_window_exceeded() {
         let limiter = RateLimiter::new();
 
-        // Use license validation for easier testing (limit of 5)
-        let service = Service::LicenseValidation;
+        // Use Groq for testing
+        let service = Service::Groq;
 
-        // Make 5 requests (at 10s minimum interval, so we need to mock or adjust)
-        // For this test, we'll just verify the structure is correct
+        // First request should succeed
         let result = limiter.check(service);
         assert!(result.is_ok());
     }
@@ -292,8 +262,8 @@ mod tests {
         // Request to Groq should succeed
         assert!(limiter.check(Service::Groq).is_ok());
 
-        // Request to Claude should also succeed (different service)
-        assert!(limiter.check(Service::Claude).is_ok());
+        // Request to WhisperApi should also succeed (different service)
+        assert!(limiter.check(Service::WhisperApi).is_ok());
 
         // But second request to Groq should be blocked
         let result = limiter.check(Service::Groq);

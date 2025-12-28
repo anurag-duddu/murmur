@@ -61,11 +61,6 @@ impl RecordingState {
                 | RecordingState::Transforming
         )
     }
-
-    /// Check if we're in a busy state (recording or processing)
-    pub fn is_busy(&self) -> bool {
-        !matches!(self, RecordingState::Idle | RecordingState::Error)
-    }
 }
 
 /// State change event payload
@@ -110,15 +105,6 @@ pub struct ErrorEvent {
 }
 
 impl ErrorEvent {
-    pub fn mic_permission_denied() -> Self {
-        ErrorEvent {
-            code: "MIC_PERMISSION_DENIED".to_string(),
-            message: "Microphone access denied. Please grant permission in System Preferences.".to_string(),
-            recoverable: true,
-            fallback_text: None,
-        }
-    }
-
     pub fn no_audio_device() -> Self {
         ErrorEvent {
             code: "NO_AUDIO_DEVICE".to_string(),
@@ -155,17 +141,6 @@ impl ErrorEvent {
         }
     }
 
-    pub fn network_error(msg: &str) -> Self {
-        ErrorEvent {
-            code: "NETWORK_ERROR".to_string(),
-            message: format!("Network error: {}", msg),
-            recoverable: true,
-            fallback_text: None,
-        }
-    }
-
-    // New: Whisper-related errors
-
     pub fn whisper_error(msg: &str) -> Self {
         ErrorEvent {
             code: "WHISPER_ERROR".to_string(),
@@ -184,59 +159,12 @@ impl ErrorEvent {
         }
     }
 
-    pub fn model_download_failed(msg: &str) -> Self {
-        ErrorEvent {
-            code: "MODEL_DOWNLOAD_FAILED".to_string(),
-            message: format!("Failed to download model: {}", msg),
-            recoverable: true,
-            fallback_text: None,
-        }
-    }
-
-    pub fn license_invalid(msg: &str) -> Self {
-        ErrorEvent {
-            code: "LICENSE_INVALID".to_string(),
-            message: format!("License validation failed: {}", msg),
-            recoverable: true,
-            fallback_text: None,
-        }
-    }
-
     pub fn no_transcription_provider() -> Self {
         ErrorEvent {
             code: "NO_TRANSCRIPTION_PROVIDER".to_string(),
             message: "No transcription provider configured. Please set up Deepgram API key or activate a license.".to_string(),
             recoverable: true,
             fallback_text: None,
-        }
-    }
-
-    // Command Mode errors
-
-    pub fn no_selection() -> Self {
-        ErrorEvent {
-            code: "NO_SELECTION".to_string(),
-            message: "No text selected. Select text first to use Command Mode.".to_string(),
-            recoverable: true,
-            fallback_text: None,
-        }
-    }
-
-    pub fn accessibility_denied() -> Self {
-        ErrorEvent {
-            code: "ACCESSIBILITY_DENIED".to_string(),
-            message: "Accessibility permission denied. Enable in System Settings → Privacy → Accessibility.".to_string(),
-            recoverable: true,
-            fallback_text: None,
-        }
-    }
-
-    pub fn transformation_failed(msg: &str, fallback: Option<String>) -> Self {
-        ErrorEvent {
-            code: "TRANSFORMATION_FAILED".to_string(),
-            message: format!("Transformation failed: {}", msg),
-            recoverable: true,
-            fallback_text: fallback,
         }
     }
 
@@ -388,42 +316,6 @@ mod tests {
         assert!(!state.can_cancel());
     }
 
-    #[test]
-    fn test_is_busy_while_recording() {
-        let state = RecordingState::Recording;
-        assert!(state.is_busy());
-    }
-
-    #[test]
-    fn test_is_busy_while_transcribing() {
-        let state = RecordingState::Transcribing;
-        assert!(state.is_busy());
-    }
-
-    #[test]
-    fn test_is_busy_while_enhancing() {
-        let state = RecordingState::Enhancing;
-        assert!(state.is_busy());
-    }
-
-    #[test]
-    fn test_is_busy_while_transforming() {
-        let state = RecordingState::Transforming;
-        assert!(state.is_busy());
-    }
-
-    #[test]
-    fn test_not_busy_when_idle() {
-        let state = RecordingState::Idle;
-        assert!(!state.is_busy());
-    }
-
-    #[test]
-    fn test_not_busy_when_error() {
-        let state = RecordingState::Error;
-        assert!(!state.is_busy());
-    }
-
     // ==================== StateChangeEvent Tests ====================
 
     #[test]
@@ -489,15 +381,6 @@ mod tests {
     // ==================== ErrorEvent Tests ====================
 
     #[test]
-    fn test_error_event_mic_permission_denied() {
-        let event = ErrorEvent::mic_permission_denied();
-        assert_eq!(event.code, "MIC_PERMISSION_DENIED");
-        assert!(event.message.contains("Microphone access denied"));
-        assert!(event.recoverable);
-        assert!(event.fallback_text.is_none());
-    }
-
-    #[test]
     fn test_error_event_no_audio_device() {
         let event = ErrorEvent::no_audio_device();
         assert_eq!(event.code, "NO_AUDIO_DEVICE");
@@ -537,13 +420,6 @@ mod tests {
     }
 
     #[test]
-    fn test_error_event_network_error() {
-        let event = ErrorEvent::network_error("Connection refused");
-        assert_eq!(event.code, "NETWORK_ERROR");
-        assert!(event.message.contains("Connection refused"));
-    }
-
-    #[test]
     fn test_error_event_whisper_error() {
         let event = ErrorEvent::whisper_error("Model inference failed");
         assert_eq!(event.code, "WHISPER_ERROR");
@@ -558,46 +434,10 @@ mod tests {
     }
 
     #[test]
-    fn test_error_event_model_download_failed() {
-        let event = ErrorEvent::model_download_failed("Network timeout");
-        assert_eq!(event.code, "MODEL_DOWNLOAD_FAILED");
-        assert!(event.message.contains("Network timeout"));
-    }
-
-    #[test]
-    fn test_error_event_license_invalid() {
-        let event = ErrorEvent::license_invalid("Expired");
-        assert_eq!(event.code, "LICENSE_INVALID");
-        assert!(event.message.contains("Expired"));
-    }
-
-    #[test]
     fn test_error_event_no_transcription_provider() {
         let event = ErrorEvent::no_transcription_provider();
         assert_eq!(event.code, "NO_TRANSCRIPTION_PROVIDER");
         assert!(event.message.contains("No transcription provider"));
-    }
-
-    #[test]
-    fn test_error_event_no_selection() {
-        let event = ErrorEvent::no_selection();
-        assert_eq!(event.code, "NO_SELECTION");
-        assert!(event.message.contains("No text selected"));
-    }
-
-    #[test]
-    fn test_error_event_accessibility_denied() {
-        let event = ErrorEvent::accessibility_denied();
-        assert_eq!(event.code, "ACCESSIBILITY_DENIED");
-        assert!(event.message.contains("Accessibility permission denied"));
-    }
-
-    #[test]
-    fn test_error_event_transformation_failed() {
-        let event = ErrorEvent::transformation_failed("Invalid command", Some("original".to_string()));
-        assert_eq!(event.code, "TRANSFORMATION_FAILED");
-        assert!(event.message.contains("Invalid command"));
-        assert_eq!(event.fallback_text, Some("original".to_string()));
     }
 
     #[test]

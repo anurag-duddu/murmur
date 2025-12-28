@@ -56,7 +56,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.anthropic.com https://api.deepgram.com https://api.groq.com https://api.lemonsqueezy.com https://huggingface.co https://*.huggingface.co; font-src 'self' data:"
     }
   },
   "bundle": {

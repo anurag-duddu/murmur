@@ -4,17 +4,6 @@
 
 use super::{AutoFeatures, Style};
 
-/// Get all built-in styles.
-pub fn get_all_styles() -> Vec<Style> {
-    vec![
-        casual(),
-        professional(),
-        neutral(),
-        technical(),
-        creative(),
-    ]
-}
-
 /// Get the default style (neutral).
 pub fn get_default_style() -> Style {
     neutral()
@@ -138,15 +127,6 @@ pub fn creative() -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_all_styles_have_unique_ids() {
-        let styles = get_all_styles();
-        let mut ids: Vec<&str> = styles.iter().map(|s| s.id.as_str()).collect();
-        ids.sort();
-        ids.dedup();
-        assert_eq!(ids.len(), styles.len(), "Style IDs must be unique");
-    }
 
     #[test]
     fn test_get_style_by_id() {

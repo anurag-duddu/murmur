@@ -206,18 +206,6 @@ pub fn mark_onboarding_complete() -> Result<(), String> {
     Ok(())
 }
 
-/// Get selected microphone device ID
-pub fn get_selected_microphone() -> Option<String> {
-    let config_dir = dirs::config_dir()?.join("murmur");
-    let mic_file = config_dir.join("selected_microphone");
-
-    if mic_file.exists() {
-        std::fs::read_to_string(mic_file).ok()
-    } else {
-        None
-    }
-}
-
 /// Set selected microphone device ID
 pub fn set_selected_microphone(device_id: &str) -> Result<(), String> {
     let config_dir = dirs::config_dir()

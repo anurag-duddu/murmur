@@ -84,24 +84,6 @@ const CLI_PATTERNS: &[(&str, &str)] = &[
     ("pip install", "pip install"),
 ];
 
-/// Word-to-symbol mappings for CLI options.
-/// These are applied after the main pattern replacement.
-const CLI_OPTION_SHORTCUTS: &[(&str, &str)] = &[
-    // Common single-letter options
-    ("verbose", "v"),
-    ("help", "h"),
-    ("version", "V"),
-    ("recursive", "r"),
-    ("force", "f"),
-    ("all", "a"),
-    ("long", "l"),
-    ("quiet", "q"),
-    ("silent", "s"),
-    ("interactive", "i"),
-    ("yes", "y"),
-    ("no", "n"),
-];
-
 /// Compiled regex patterns for CLI replacement.
 static CLI_REGEX_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     CLI_PATTERNS
@@ -119,16 +101,19 @@ static CLI_REGEX_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(
 });
 
 /// Pattern for "dash [letter]" → "-[letter]"
+/// SAFETY: unwrap() is safe - compile-time constant regex validated during development.
 static DASH_LETTER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\bdash\s+([a-z])\b").unwrap()
 });
 
 /// Pattern for "dash dash [word]" → "--[word]"
+/// SAFETY: unwrap() is safe - compile-time constant regex validated during development.
 static DASH_DASH_WORD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\bdash\s+dash\s+(\w+)").unwrap()
 });
 
 /// Pattern for "double dash [word]" → "--[word]"
+/// SAFETY: unwrap() is safe - compile-time constant regex validated during development.
 static DOUBLE_DASH_WORD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\bdouble\s+dash\s+(\w+)").unwrap()
 });

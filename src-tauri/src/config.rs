@@ -1,3 +1,4 @@
+use crate::secure_storage::{self, keys as secret_keys};
 use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -40,22 +41,29 @@ impl TranscriptionProvider {
     }
 }
 
-/// Stored preferences that persist to disk
+/// Stored preferences that persist to disk.
+/// NOTE: Sensitive fields (API keys, license key) are stored in the system keychain,
+/// not in this JSON file. The fields here are kept for migration purposes only.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StoredPreferences {
+    // DEPRECATED: These are now stored in keychain. Kept for migration from old versions.
+    #[serde(skip_serializing, default)]
     pub deepgram_api_key: Option<String>,
+    #[serde(skip_serializing, default)]
     pub groq_api_key: Option<String>,
+    #[serde(skip_serializing, default)]
     pub anthropic_api_key: Option<String>,
+    #[serde(skip_serializing, default)]
+    pub license_key: Option<String>,
+
+    // Non-sensitive preferences (stored in JSON file)
     pub recording_mode: Option<String>,
     pub hotkey: Option<String>,
     pub show_indicator: Option<bool>,
     pub play_sounds: Option<bool>,
     pub microphone: Option<String>,
     pub language: Option<String>,
-    // New: Transcription provider settings
     pub transcription_provider: Option<String>,
-    pub license_key: Option<String>,
-    // Onboarding settings
     pub onboarding_complete: Option<bool>,
     pub spoken_languages: Option<Vec<String>>,
 }
@@ -126,23 +134,67 @@ impl AppConfig {
         // Load .env file if it exists (for development)
         dotenv().ok();
 
-        // Load stored preferences from file
+        // Load stored preferences from file (may contain old plaintext keys for migration)
         let stored = StoredPreferences::load();
 
-        // Priority: stored preferences > env vars > defaults
+        // Load secrets from keychain, migrating from plaintext if necessary
+        // Priority: keychain > plaintext file (migrate) > env vars
+        let deepgram_api_key = secure_storage::migrate_to_keychain(
+            secret_keys::DEEPGRAM_API_KEY,
+            stored.deepgram_api_key.clone(),
+        )
+        .ok()
+        .flatten()
+        .or_else(|| env::var("DEEPGRAM_API_KEY").ok().filter(|s| !s.is_empty()));
+
+        let groq_api_key = secure_storage::migrate_to_keychain(
+            secret_keys::GROQ_API_KEY,
+            stored.groq_api_key.clone(),
+        )
+        .ok()
+        .flatten()
+        .or_else(|| env::var("GROQ_API_KEY").ok().filter(|s| !s.is_empty()));
+
+        let anthropic_api_key = secure_storage::migrate_to_keychain(
+            secret_keys::ANTHROPIC_API_KEY,
+            stored.anthropic_api_key.clone(),
+        )
+        .ok()
+        .flatten()
+        .or_else(|| env::var("ANTHROPIC_API_KEY").ok().filter(|s| !s.is_empty()));
+
+        let license_key = secure_storage::migrate_to_keychain(
+            secret_keys::LICENSE_KEY,
+            stored.license_key.clone(),
+        )
+        .ok()
+        .flatten()
+        .or_else(|| env::var("LICENSE_KEY").ok().filter(|s| !s.is_empty()));
+
+        // If we migrated any keys, re-save preferences to remove plaintext keys from file
+        if stored.deepgram_api_key.is_some()
+            || stored.groq_api_key.is_some()
+            || stored.anthropic_api_key.is_some()
+            || stored.license_key.is_some()
+        {
+            // Re-save to remove plaintext keys (they're now skip_serializing)
+            let _ = stored.save();
+        }
+
         AppConfig {
-            deepgram_api_key: stored.deepgram_api_key
-                .or_else(|| env::var("DEEPGRAM_API_KEY").ok().filter(|s| !s.is_empty())),
-            groq_api_key: stored.groq_api_key
-                .or_else(|| env::var("GROQ_API_KEY").ok().filter(|s| !s.is_empty())),
-            anthropic_api_key: stored.anthropic_api_key
-                .or_else(|| env::var("ANTHROPIC_API_KEY").ok().filter(|s| !s.is_empty())),
-            recording_mode: stored.recording_mode
-                .unwrap_or_else(|| env::var("DEFAULT_RECORDING_MODE")
-                    .unwrap_or_else(|_| "push-to-talk".to_string())),
-            hotkey: stored.hotkey
-                .unwrap_or_else(|| env::var("DEFAULT_HOTKEY")
-                    .unwrap_or_else(|_| "Option+Space".to_string())),
+            deepgram_api_key,
+            groq_api_key,
+            anthropic_api_key,
+            recording_mode: stored
+                .recording_mode
+                .unwrap_or_else(|| {
+                    env::var("DEFAULT_RECORDING_MODE").unwrap_or_else(|_| "push-to-talk".to_string())
+                }),
+            hotkey: stored
+                .hotkey
+                .unwrap_or_else(|| {
+                    env::var("DEFAULT_HOTKEY").unwrap_or_else(|_| "Option+Space".to_string())
+                }),
             max_recording_duration: env::var("MAX_RECORDING_DURATION")
                 .unwrap_or_else(|_| "1800".to_string())
                 .parse()
@@ -165,21 +217,22 @@ impl AppConfig {
             play_sounds: stored.play_sounds.unwrap_or(true),
             microphone: stored.microphone.unwrap_or_else(|| "default".to_string()),
             language: stored.language.unwrap_or_else(|| "en-US".to_string()),
-            // New: Transcription provider - auto-detect based on available keys
-            transcription_provider: stored.transcription_provider
+            transcription_provider: stored
+                .transcription_provider
                 .map(|s| TranscriptionProvider::from_string(&s))
                 .unwrap_or_else(TranscriptionProvider::default),
-            license_key: stored.license_key
-                .or_else(|| env::var("LICENSE_KEY").ok().filter(|s| !s.is_empty())),
+            license_key,
         }
     }
 
     pub fn update_from_preferences(&mut self, prefs: Preferences) -> Result<(), String> {
-        // Update in-memory config
+        // Update in-memory config and store secrets in keychain
         if !prefs.deepgram_key.is_empty() {
+            secure_storage::store_secret(secret_keys::DEEPGRAM_API_KEY, &prefs.deepgram_key)?;
             self.deepgram_api_key = Some(prefs.deepgram_key.clone());
         }
         if !prefs.anthropic_key.is_empty() {
+            secure_storage::store_secret(secret_keys::ANTHROPIC_API_KEY, &prefs.anthropic_key)?;
             self.anthropic_api_key = Some(prefs.anthropic_key.clone());
         }
         self.recording_mode = prefs.recording_mode.clone();
@@ -188,39 +241,36 @@ impl AppConfig {
         self.play_sounds = prefs.play_sounds;
         self.microphone = prefs.microphone.clone();
         self.language = prefs.language.clone();
-        // New: Update transcription provider and license key
+
+        // Update transcription provider
         if let Some(provider) = &prefs.transcription_provider {
             self.transcription_provider = TranscriptionProvider::from_string(provider);
         }
+
+        // Store license key in keychain
         if let Some(license) = &prefs.license_key {
             if !license.is_empty() {
+                secure_storage::store_secret(secret_keys::LICENSE_KEY, license)?;
                 self.license_key = Some(license.clone());
             }
         }
 
-        // Persist to disk
+        // Persist non-sensitive preferences to disk
+        // Note: API keys are NOT stored here - they go to keychain
         let stored = StoredPreferences {
-            deepgram_api_key: if prefs.deepgram_key.is_empty() {
-                self.deepgram_api_key.clone()
-            } else {
-                Some(prefs.deepgram_key)
-            },
-            groq_api_key: self.groq_api_key.clone(),
-            anthropic_api_key: if prefs.anthropic_key.is_empty() {
-                self.anthropic_api_key.clone()
-            } else {
-                Some(prefs.anthropic_key)
-            },
+            // These fields are skip_serializing, so they won't be written to file
+            deepgram_api_key: None,
+            groq_api_key: None,
+            anthropic_api_key: None,
+            license_key: None,
+            // Non-sensitive preferences
             recording_mode: Some(prefs.recording_mode),
             hotkey: Some(prefs.hotkey),
             show_indicator: Some(prefs.show_indicator),
             play_sounds: Some(prefs.play_sounds),
             microphone: Some(prefs.microphone),
             language: Some(prefs.language),
-            // New: Save transcription provider and license key
             transcription_provider: Some(self.transcription_provider.to_string()),
-            license_key: self.license_key.clone(),
-            // Onboarding settings
             onboarding_complete: prefs.onboarding_complete,
             spoken_languages: prefs.spoken_languages,
         };
@@ -359,7 +409,12 @@ mod tests {
         };
 
         let json = serde_json::to_string(&prefs).unwrap();
-        assert!(json.contains("\"deepgram_api_key\":\"dg_key\""));
+        // API keys should NOT be serialized (skip_serializing) - they go to keychain
+        assert!(!json.contains("deepgram_api_key"), "API keys should not be serialized");
+        assert!(!json.contains("groq_api_key"), "API keys should not be serialized");
+        assert!(!json.contains("anthropic_api_key"), "API keys should not be serialized");
+        assert!(!json.contains("license_key"), "License key should not be serialized");
+        // Non-sensitive fields should be serialized
         assert!(json.contains("\"recording_mode\":\"push-to-talk\""));
         assert!(json.contains("\"show_indicator\":true"));
         assert!(json.contains("\"spoken_languages\":[\"en\",\"es\"]"));

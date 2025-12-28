@@ -1,3 +1,5 @@
+use crate::http_client;
+use crate::rate_limit::{check_rate_limit, Service};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -31,12 +33,12 @@ pub struct ClaudeClient {
 }
 
 impl ClaudeClient {
-    pub fn new(api_key: String, model: Option<String>) -> Self {
-        ClaudeClient {
+    pub fn new(api_key: String, model: Option<String>) -> Result<Self, String> {
+        Ok(ClaudeClient {
             api_key,
             model: model.unwrap_or_else(|| "claude-3-5-sonnet-20241022".to_string()),
-            client: Client::new(),
-        }
+            client: http_client::create_secure_client()?,
+        })
     }
 
     pub async fn enhance_text(
@@ -44,6 +46,9 @@ impl ClaudeClient {
         transcript: &str,
         app_context: Option<&str>,
     ) -> Result<String, String> {
+        // Check rate limit before making API call
+        check_rate_limit(Service::Claude)?;
+
         println!("Enhancing text with Claude...");
 
         let url = "https://api.anthropic.com/v1/messages";
@@ -115,6 +120,7 @@ Enhanced text:"#,
             .map(|content| content.text.trim().to_string())
             .ok_or("No enhanced text found in Claude response")?;
 
+        #[cfg(debug_assertions)]
         println!("Claude enhanced text: {}", enhanced_text);
 
         Ok(enhanced_text)

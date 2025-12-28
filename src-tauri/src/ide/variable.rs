@@ -77,6 +77,8 @@ fn capitalize(s: &str) -> String {
 
 /// Trigger phrase patterns for case styles.
 /// Format: (regex pattern, case style, capture group index for words)
+/// SAFETY: unwrap() is safe for all regexes below - they are compile-time constant
+/// strings that have been validated during development.
 static CASE_TRIGGER_PATTERNS: LazyLock<Vec<(Regex, CaseStyle)>> = LazyLock::new(|| {
     vec![
         // "camel case [words]"
@@ -161,25 +163,6 @@ pub fn apply_variable_patterns(text: &str, _default_style: CaseStyle) -> String 
     result
 }
 
-/// Detect if text contains a case trigger and extract the style and words.
-///
-/// Returns None if no trigger is found.
-pub fn detect_case_trigger(text: &str) -> Option<(CaseStyle, Vec<String>)> {
-    for (regex, style) in CASE_TRIGGER_PATTERNS.iter() {
-        if let Some(captures) = regex.captures(text) {
-            if let Some(words_match) = captures.get(1) {
-                let words: Vec<String> = words_match
-                    .as_str()
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
-                return Some((*style, words));
-            }
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,18 +232,6 @@ mod tests {
         let result =
             apply_variable_patterns("user underscore first underscore name", CaseStyle::CamelCase);
         assert_eq!(result, "user_first_name");
-    }
-
-    #[test]
-    fn test_detect_case_trigger() {
-        let (style, words) = detect_case_trigger("camel case user name").unwrap();
-        assert_eq!(style, CaseStyle::CamelCase);
-        assert_eq!(words, vec!["user", "name"]);
-    }
-
-    #[test]
-    fn test_detect_no_trigger() {
-        assert!(detect_case_trigger("hello world").is_none());
     }
 
     #[test]

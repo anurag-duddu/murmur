@@ -5,31 +5,46 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Emitter, Manager, Runtime, State, WindowEvent,
 };
-use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod audio;
 mod claude;
 mod config;
 mod deepgram;
+mod error;
 mod groq_llm;
+mod http_client;
 mod ide;
 mod licensing;
 mod model_manager;
 mod permissions;
 mod platform;
+mod rate_limit;
+mod secure_storage;
 mod state;
 mod styles;
-mod transcription;
 mod whisper_api;
 mod whisper_local;
 
-use audio::AudioRecorder;
+use audio::{encode_samples_to_wav, AudioRecorder};
 use claude::ClaudeClient;
 use config::{AppConfig, TranscriptionProvider};
 use deepgram::DeepgramClient;
 use groq_llm::{GroqLlmClient, UserIntent};
 use state::{DictationMode, ErrorEvent, RecordingState, StateChangeEvent, TranscriptionCompleteEvent};
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+/// Offset from bottom of screen for overlay positioning (pixels)
+const OVERLAY_BOTTOM_OFFSET: i32 = 300;
+
+/// How long to display "Done!" state before hiding overlay (ms)
+const DONE_DISPLAY_DELAY_MS: u64 = 300;
+
+/// How long to wait for the target app to regain focus after hiding overlay (ms)
+const APP_FOCUS_WAIT_MS: u64 = 100;
 
 /// Application state - single source of truth
 pub struct AppState {
@@ -148,6 +163,47 @@ impl AppState {
             .ok()
             .and_then(|start| start.map(|s| s.elapsed().as_millis() as u64))
     }
+
+    /// Execute a closure with read access to the config
+    fn with_config<F, R>(&self, f: F) -> Result<R, String>
+    where
+        F: FnOnce(&AppConfig) -> R,
+    {
+        self.config
+            .lock()
+            .map(|c| f(&c))
+            .map_err(|e| format!("Failed to lock config: {}", e))
+    }
+
+    /// Execute a closure with mutable access to the config
+    #[allow(dead_code)]
+    fn with_config_mut<F, R>(&self, f: F) -> Result<R, String>
+    where
+        F: FnOnce(&mut AppConfig) -> R,
+    {
+        self.config
+            .lock()
+            .map(|mut c| f(&mut c))
+            .map_err(|e| format!("Failed to lock config: {}", e))
+    }
+
+    /// Execute a closure with mutable access to the recorder
+    fn with_recorder_mut<F, R>(&self, f: F) -> Result<R, String>
+    where
+        F: FnOnce(&mut AudioRecorder) -> R,
+    {
+        self.recorder
+            .lock()
+            .map(|mut r| f(&mut r))
+            .map_err(|e| format!("Failed to lock recorder: {}", e))
+    }
+
+    /// Set the recording start time
+    fn set_recording_start(&self, start: Option<Instant>) {
+        if let Ok(mut s) = self.recording_start.lock() {
+            *s = start;
+        }
+    }
 }
 
 /// Emit state change event - directly to overlay window for reliable delivery
@@ -218,13 +274,11 @@ async fn start_recording(app_handle: AppHandle, state: State<'_, AppState>) -> R
     // Set state to Recording immediately (default to Dictation mode)
     state.set_state(RecordingState::Recording);
     state.set_mode(DictationMode::Dictation); // Default, may update async
-    if let Ok(mut start) = state.recording_start.lock() {
-        *start = Some(Instant::now());
-    }
+    state.set_recording_start(Some(Instant::now()));
 
     // Show overlay IMMEDIATELY - no delay
     if let Some(overlay) = app_handle.get_webview_window("overlay") {
-        position_overlay_center_bottom(&overlay, 300);
+        position_overlay_center_bottom(&overlay, OVERLAY_BOTTOM_OFFSET);
         let _ = overlay.show();
     }
 
@@ -298,117 +352,133 @@ async fn stop_recording(app_handle: AppHandle, state: State<'_, AppState>) -> Re
         ));
     }
 
+    // Use shared processing logic
+    let final_text = process_recording_stop(&app_handle, &state).await?;
+
+    // Hide overlay, wait for previous app to regain focus, then insert text
+    let app_clone = app_handle.clone();
+    std::thread::spawn(move || {
+        // Brief delay to show "Done!" state
+        std::thread::sleep(std::time::Duration::from_millis(DONE_DISPLAY_DELAY_MS));
+        hide_overlay(&app_clone);
+        // Wait for the previous app to regain focus
+        std::thread::sleep(std::time::Duration::from_millis(APP_FOCUS_WAIT_MS));
+        // Insert text while preserving clipboard
+        insert_text_directly(&final_text);
+    });
+
+    Ok(())
+}
+
+/// Configuration extracted from app state for recording stop processing
+struct RecordingStopConfig {
+    provider: TranscriptionProvider,
+    deepgram_key: Option<String>,
+    groq_key: Option<String>,
+    anthropic_key: Option<String>,
+    claude_model: String,
+    language: String,
+    spoken_languages: Vec<String>,
+}
+
+/// Shared logic for stopping a recording and processing the audio.
+/// Used by both the Tauri command `stop_recording` and the shortcut handler.
+async fn process_recording_stop(
+    app_handle: &AppHandle,
+    state: &AppState,
+) -> Result<String, String> {
     // Update state to transcribing
     state.set_state(RecordingState::Transcribing);
-    emit_state_change(
-        &app_handle,
-        &state,
-        Some("Processing audio...".to_string()),
-    );
+    emit_state_change(app_handle, state, Some("Processing audio...".to_string()));
 
-    // Get configuration first to determine which audio format we need
-    let (provider, deepgram_key, groq_key, anthropic_key, claude_model, language, spoken_languages) = {
-        let config = state
-            .config
-            .lock()
-            .map_err(|e| format!("Failed to lock config: {}", e))?;
+    // Get configuration
+    let stored = config::StoredPreferences::load();
+    let spoken_langs = stored
+        .spoken_languages
+        .unwrap_or_else(|| vec!["en".to_string()]);
 
-        // Load spoken languages from stored preferences
-        let stored = config::StoredPreferences::load();
-        let spoken_langs = stored.spoken_languages.unwrap_or_else(|| vec!["en".to_string()]);
+    let config = state.with_config(|cfg| RecordingStopConfig {
+        provider: cfg.transcription_provider.clone(),
+        deepgram_key: cfg.deepgram_api_key.clone(),
+        groq_key: cfg.groq_api_key.clone(),
+        anthropic_key: cfg.anthropic_api_key.clone(),
+        claude_model: cfg.claude_model.clone(),
+        language: cfg.language.clone(),
+        spoken_languages: spoken_langs,
+    })?;
 
-        (
-            config.transcription_provider.clone(),
-            config.deepgram_api_key.clone(),
-            config.groq_api_key.clone(),
-            config.anthropic_api_key.clone(),
-            config.claude_model.clone(),
-            config.language.clone(),
-            spoken_langs,
-        )
-    };
-
-    // Stop recording and get audio data in the appropriate format
-    let (audio_wav, audio_samples_16khz) = {
-        let mut recorder = state
-            .recorder
-            .lock()
-            .map_err(|e| format!("Failed to lock recorder: {}", e))?;
-
+    // Stop recording and get audio data
+    let provider = config.provider.clone();
+    let (audio_wav, audio_samples_16khz) = state.with_recorder_mut(|recorder| {
         match provider {
             TranscriptionProvider::Deepgram => {
-                // Deepgram uses WAV format
                 let wav = recorder.stop_recording()?;
-                (wav, Vec::new())
+                Ok::<_, String>((wav, Vec::new()))
             }
             TranscriptionProvider::WhisperApi | TranscriptionProvider::WhisperLocal => {
-                // Whisper providers need 16kHz f32 samples AND WAV for API
-                // First get the samples for Whisper
                 let samples = recorder.stop_recording_for_whisper()?;
-                // We also need WAV for Whisper API (it accepts WAV over HTTP)
-                // Re-create WAV from the original samples
-                let wav = Vec::new(); // Will re-fetch if needed
-                (wav, samples)
+                Ok::<_, String>((Vec::new(), samples))
             }
         }
-    };
+    })??;
 
     // Check if we have audio
-    let has_audio = match provider {
+    let has_audio = match config.provider {
         TranscriptionProvider::Deepgram => !audio_wav.is_empty(),
         _ => !audio_samples_16khz.is_empty(),
     };
 
     if !has_audio {
         state.set_state(RecordingState::Error);
-        emit_error(&app_handle, ErrorEvent::no_audio_captured());
+        emit_error(app_handle, ErrorEvent::no_audio_captured());
+        hide_overlay(app_handle);
         return Err("No audio captured".to_string());
     }
 
     // Transcribe using the configured provider
-    emit_state_change(
-        &app_handle,
-        &state,
-        Some("Transcribing...".to_string()),
-    );
+    emit_state_change(app_handle, state, Some("Transcribing...".to_string()));
 
-    let transcript = match &provider {
+    let transcript = match &config.provider {
         TranscriptionProvider::Deepgram => {
-            let api_key = deepgram_key.ok_or("Deepgram API key not configured")?;
-            let client = DeepgramClient::new(api_key, Some(language.clone()));
+            let api_key = config
+                .deepgram_key
+                .clone()
+                .ok_or("Deepgram API key not configured")?;
+            let client = DeepgramClient::new(api_key, Some(config.language.clone()))?;
             client.transcribe_audio(audio_wav).await.map_err(|e| {
                 state.set_state(RecordingState::Error);
-                emit_error(&app_handle, ErrorEvent::deepgram_error(&e));
-                hide_overlay(&app_handle);
+                emit_error(app_handle, ErrorEvent::deepgram_error(&e));
+                hide_overlay(app_handle);
                 e
             })?
         }
         TranscriptionProvider::WhisperApi => {
-            // For Whisper API, we need to re-encode the samples as WAV
             let wav = encode_samples_to_wav(&audio_samples_16khz, 16000)?;
-            // WhisperApiClient uses groq_api_key from config or GROQ_API_KEY env var
-            let client = whisper_api::WhisperApiClient::new(groq_key.unwrap_or_default());
-            client.transcribe(&wav, &language, &spoken_languages).await.map_err(|e| {
-                state.set_state(RecordingState::Error);
-                emit_error(&app_handle, ErrorEvent::whisper_error(&e));
-                hide_overlay(&app_handle);
-                e
-            })?
-        }
-        TranscriptionProvider::WhisperLocal => {
-            // Check if model is downloaded
-            if !model_manager::is_model_downloaded() {
-                state.set_state(RecordingState::Error);
-                emit_error(&app_handle, ErrorEvent::model_not_loaded());
-                hide_overlay(&app_handle);
-                return Err("Whisper model not downloaded".to_string());
-            }
-            whisper_local::WhisperLocalClient::transcribe(&audio_samples_16khz, &language)
+            let client =
+                whisper_api::WhisperApiClient::new(config.groq_key.clone().unwrap_or_default())?;
+            client
+                .transcribe(&wav, &config.language, &config.spoken_languages)
                 .await
                 .map_err(|e| {
                     state.set_state(RecordingState::Error);
-                    emit_error(&app_handle, ErrorEvent::whisper_error(&e));
-                    hide_overlay(&app_handle);
+                    emit_error(app_handle, ErrorEvent::whisper_error(&e));
+                    hide_overlay(app_handle);
+                    e
+                })?
+        }
+        TranscriptionProvider::WhisperLocal => {
+            if !model_manager::is_model_downloaded() {
+                state.set_state(RecordingState::Error);
+                emit_error(app_handle, ErrorEvent::model_not_loaded());
+                hide_overlay(app_handle);
+                return Err("Whisper model not downloaded".to_string());
+            }
+            whisper_local::WhisperLocalClient::transcribe(&audio_samples_16khz, &config.language)
+                .await
+                .map_err(|e| {
+                    state.set_state(RecordingState::Error);
+                    emit_error(app_handle, ErrorEvent::whisper_error(&e));
+                    hide_overlay(app_handle);
                     e
                 })?
         }
@@ -416,101 +486,222 @@ async fn stop_recording(app_handle: AppHandle, state: State<'_, AppState>) -> Re
 
     if transcript.is_empty() {
         state.set_state(RecordingState::Error);
-        emit_error(&app_handle, ErrorEvent::no_audio_captured());
-        hide_overlay(&app_handle);
+        emit_error(app_handle, ErrorEvent::no_audio_captured());
+        hide_overlay(app_handle);
         return Err("No speech detected".to_string());
     }
 
-    println!("Transcript ({}): {}", provider.to_string(), transcript);
+    #[cfg(debug_assertions)]
+    println!("Transcript ({}): {}", config.provider.to_string(), transcript);
 
-    // Update state to enhancing
-    state.set_state(RecordingState::Enhancing);
-    emit_state_change(&app_handle, &state, Some("Enhancing...".to_string()));
-
-    // Enhance with Claude (if API key is available)
-    let enhanced_text = if let Some(api_key) = anthropic_key {
-        let claude_client = ClaudeClient::new(api_key, Some(claude_model));
-        match claude_client.enhance_text(&transcript, None).await {
-            Ok(t) => t,
-            Err(e) => {
-                // Fallback to raw transcript
-                println!("Claude enhancement failed, using raw transcript: {}", e);
-                emit_error(
-                    &app_handle,
-                    ErrorEvent::claude_error(&e, Some(transcript.clone())),
-                );
-                transcript.clone()
+    // Apply IDE transformations if we're in a code editor
+    let active_bundle_id = state.get_active_bundle_id();
+    let workspace_index = state.get_workspace_index();
+    let transcript = if let Some(ref bundle_id) = active_bundle_id {
+        if ide::is_ide(bundle_id) {
+            let ide_context = ide::get_ide_context(bundle_id);
+            let ide_settings = ide::IDESettings::default();
+            let transformed = ide::apply_ide_transformations(
+                &transcript,
+                &ide_context,
+                &ide_settings,
+                workspace_index.as_ref(),
+            );
+            #[cfg(debug_assertions)]
+            if transformed != transcript {
+                println!("IDE transformed: {}", transformed);
             }
+            transformed
+        } else {
+            transcript
         }
     } else {
-        // No Claude API key, use raw transcript
-        transcript.clone()
+        transcript
     };
 
-    println!("Enhanced: {}", enhanced_text);
+    // Get context for mode-based processing
+    let current_mode = state.get_mode();
+    let selected_text_for_transform = state.get_selected_text();
+    let active_style = state.get_active_style();
 
-    // Emit completion (text will be inserted, not just copied)
+    // Process based on mode
+    let final_text = match current_mode {
+        DictationMode::Command => {
+            // Command mode: classify intent and either transform or dictate
+            let selected_text = match selected_text_for_transform {
+                Some(text) => text,
+                None => {
+                    #[cfg(debug_assertions)]
+                    println!(
+                        "Command Mode but no selected text, falling back to raw transcript"
+                    );
+                    transcript.clone()
+                }
+            };
+
+            let groq_client =
+                GroqLlmClient::new(config.groq_key.clone().unwrap_or_default())?;
+
+            // Classify intent
+            state.set_state(RecordingState::Transforming);
+            emit_state_change(app_handle, state, Some("Analyzing...".to_string()));
+
+            let intent = match groq_client.classify_intent(&transcript).await {
+                Ok(i) => i,
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    println!("Intent classification failed, defaulting to Dictation: {}", e);
+                    UserIntent::Dictation
+                }
+            };
+
+            match intent {
+                UserIntent::Command => {
+                    emit_state_change(app_handle, state, Some("Transforming...".to_string()));
+                    match groq_client.transform_text(&selected_text, &transcript).await {
+                        Ok(transformed) => {
+                            #[cfg(debug_assertions)]
+                            println!("Transformed text: {}", transformed);
+                            transformed
+                        }
+                        Err(e) => {
+                            #[cfg(debug_assertions)]
+                            println!("Transformation failed, keeping original: {}", e);
+                            emit_error(
+                                app_handle,
+                                ErrorEvent::groq_error(&e, Some(selected_text.clone())),
+                            );
+                            selected_text
+                        }
+                    }
+                }
+                UserIntent::Dictation => {
+                    #[cfg(debug_assertions)]
+                    println!("Intent: Dictation - will replace selection with new content");
+                    emit_state_change(app_handle, state, Some("Enhancing...".to_string()));
+
+                    let style_prompt = active_style.as_ref().map(|s| {
+                        #[cfg(debug_assertions)]
+                        println!("Applying style: {} ({})", s.name, s.id);
+                        s.prompt_modifier.as_str()
+                    });
+
+                    match groq_client.enhance_text(&transcript, style_prompt).await {
+                        Ok(enhanced) => {
+                            #[cfg(debug_assertions)]
+                            println!("Enhanced dictation (replacing selection): {}", enhanced);
+                            enhanced
+                        }
+                        Err(e) => {
+                            #[cfg(debug_assertions)]
+                            println!("Enhancement failed, using raw transcript: {}", e);
+                            emit_error(
+                                app_handle,
+                                ErrorEvent::groq_error(&e, Some(transcript.clone())),
+                            );
+                            transcript.clone()
+                        }
+                    }
+                }
+            }
+        }
+        DictationMode::Dictation => {
+            // Dictation mode: enhance with Groq (fallback to Claude)
+            state.set_state(RecordingState::Enhancing);
+            emit_state_change(app_handle, state, Some("Enhancing...".to_string()));
+
+            let style_prompt = active_style.as_ref().map(|s| {
+                #[cfg(debug_assertions)]
+                println!("Applying style: {} ({})", s.name, s.id);
+                s.prompt_modifier.as_str()
+            });
+
+            let groq_client =
+                GroqLlmClient::new(config.groq_key.clone().unwrap_or_default())?;
+
+            #[cfg(debug_assertions)]
+            println!("Before LLM enhancement: {}", transcript);
+
+            match groq_client.enhance_text(&transcript, style_prompt).await {
+                Ok(enhanced) => {
+                    #[cfg(debug_assertions)]
+                    println!("Enhanced with Groq: {}", enhanced);
+                    enhanced
+                }
+                Err(groq_error) => {
+                    #[cfg(debug_assertions)]
+                    println!("Groq enhancement failed: {}", groq_error);
+
+                    // Fallback to Claude if available
+                    if let Some(api_key) = config.anthropic_key.clone() {
+                        match ClaudeClient::new(api_key, Some(config.claude_model.clone())) {
+                            Ok(claude_client) => {
+                                match claude_client.enhance_text(&transcript, style_prompt).await {
+                                    Ok(t) => {
+                                        #[cfg(debug_assertions)]
+                                        println!("Fallback enhanced with Claude: {}", t);
+                                        t
+                                    }
+                                    Err(e) => {
+                                        #[cfg(debug_assertions)]
+                                        println!("Claude fallback also failed: {}", e);
+                                        emit_error(
+                                            app_handle,
+                                            ErrorEvent::groq_error(
+                                                &groq_error,
+                                                Some(transcript.clone()),
+                                            ),
+                                        );
+                                        transcript.clone()
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                #[cfg(debug_assertions)]
+                                println!("Failed to create Claude client: {}", e);
+                                emit_error(
+                                    app_handle,
+                                    ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
+                                );
+                                transcript.clone()
+                            }
+                        }
+                    } else {
+                        emit_error(
+                            app_handle,
+                            ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
+                        );
+                        transcript.clone()
+                    }
+                }
+            }
+        }
+    };
+
+    // Clean up punctuation attached to @-tagged filenames
+    let final_text = ide::file_tagger::cleanup_tagged_punctuation(&final_text);
+
+    // Emit completion
     let completion_event = TranscriptionCompleteEvent {
         raw_transcript: transcript,
-        enhanced_text: enhanced_text.clone(),
-        copied_to_clipboard: false, // We're inserting directly now
+        enhanced_text: final_text.clone(),
+        copied_to_clipboard: false,
     };
 
     if let Err(e) = app_handle.emit("transcription-complete", &completion_event) {
         eprintln!("Failed to emit completion: {}", e);
     }
 
-    // Return to idle
+    // Reset state
     state.set_state(RecordingState::Idle);
-    if let Ok(mut start) = state.recording_start.lock() {
-        *start = None;
-    }
-    emit_state_change(&app_handle, &state, Some("Done!".to_string()));
+    state.set_mode(DictationMode::Dictation);
+    state.set_selected_text(None);
+    state.set_active_style(None);
+    state.set_active_bundle_id(None);
+    state.set_recording_start(None);
+    emit_state_change(app_handle, state, Some("Done!".to_string()));
 
-    // Hide overlay, wait for previous app to regain focus, then insert text
-    let app_clone = app_handle.clone();
-    let text_to_insert = enhanced_text.clone();
-    std::thread::spawn(move || {
-        // Brief delay to show "Done!" state
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        hide_overlay(&app_clone);
-        // Wait for the previous app to regain focus
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        // Insert text while preserving clipboard
-        insert_text_directly(&text_to_insert);
-    });
-
-    Ok(())
-}
-
-/// Helper to encode f32 samples to WAV format
-fn encode_samples_to_wav(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>, String> {
-    let mut buffer = Vec::new();
-
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-
-    {
-        let mut writer = hound::WavWriter::new(std::io::Cursor::new(&mut buffer), spec)
-            .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
-
-        for &sample in samples {
-            let amplitude = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
-            writer
-                .write_sample(amplitude)
-                .map_err(|e| format!("Failed to write sample: {}", e))?;
-        }
-
-        writer
-            .finalize()
-            .map_err(|e| format!("Failed to finalize WAV: {}", e))?;
-    }
-
-    Ok(buffer)
+    Ok(final_text)
 }
 
 #[tauri::command]
@@ -531,9 +722,7 @@ async fn cancel_recording(app_handle: AppHandle, state: State<'_, AppState>) -> 
 
     // Return to idle
     state.set_state(RecordingState::Idle);
-    if let Ok(mut start) = state.recording_start.lock() {
-        *start = None;
-    }
+    state.set_recording_start(None);
     emit_state_change(&app_handle, &state, Some("Cancelled".to_string()));
     hide_overlay(&app_handle);
 
@@ -641,7 +830,15 @@ fn open_accessibility_settings() -> Result<(), String> {
 
 #[tauri::command]
 fn set_selected_microphone(device_id: String) -> Result<(), String> {
-    permissions::set_selected_microphone(&device_id)
+    // Input validation: device_id must be non-empty and reasonable length
+    let trimmed = device_id.trim();
+    if trimmed.is_empty() {
+        return Err("Device ID cannot be empty".to_string());
+    }
+    if trimmed.len() > 512 {
+        return Err("Device ID is too long".to_string());
+    }
+    permissions::set_selected_microphone(trimmed)
 }
 
 #[tauri::command]
@@ -688,7 +885,16 @@ fn delete_model() -> Result<(), String> {
 /// Validate a license key
 #[tauri::command]
 async fn validate_license(license_key: String) -> Result<licensing::LicenseInfo, String> {
-    licensing::validate_license(&license_key).await
+    // Input validation: license key must be non-empty and reasonable length
+    let trimmed = license_key.trim();
+    if trimmed.is_empty() {
+        return Err("License key cannot be empty".to_string());
+    }
+    if trimmed.len() > 256 {
+        return Err("License key is too long".to_string());
+    }
+
+    licensing::validate_license(trimmed).await
 }
 
 /// Activate a license key
@@ -697,7 +903,16 @@ async fn activate_license(
     state: State<'_, AppState>,
     license_key: String,
 ) -> Result<licensing::LicenseInfo, String> {
-    let info = licensing::activate_license(&license_key).await?;
+    // Input validation: license key must be non-empty and reasonable length
+    let trimmed = license_key.trim();
+    if trimmed.is_empty() {
+        return Err("License key cannot be empty".to_string());
+    }
+    if trimmed.len() > 256 {
+        return Err("License key is too long".to_string());
+    }
+
+    let info = licensing::activate_license(trimmed).await?;
 
     // Update config with the license key if valid
     if info.valid {
@@ -706,7 +921,7 @@ async fn activate_license(
             .lock()
             .map_err(|e| format!("Failed to lock config: {}", e))?;
 
-        config.license_key = Some(license_key);
+        config.license_key = Some(trimmed.to_string());
 
         // Auto-select provider based on license tier
         match info.tier {
@@ -752,12 +967,23 @@ fn set_transcription_provider(
     state: State<'_, AppState>,
     provider: String,
 ) -> Result<(), String> {
+    // Input validation: provider must be a valid option
+    let valid_providers = ["deepgram", "whisperapi", "whisper_api", "whisper-api", "whisperlocal", "whisper_local", "whisper-local"];
+    let provider_lower = provider.to_lowercase();
+    if !valid_providers.contains(&provider_lower.as_str()) {
+        return Err(format!(
+            "Invalid provider '{}'. Valid options: deepgram, whisperapi, whisperlocal",
+            provider
+        ));
+    }
+
     let mut config = state
         .config
         .lock()
         .map_err(|e| format!("Failed to lock config: {}", e))?;
 
     config.transcription_provider = TranscriptionProvider::from_string(&provider);
+    #[cfg(debug_assertions)]
     println!("Transcription provider set to: {:?}", config.transcription_provider);
 
     Ok(())
@@ -766,6 +992,56 @@ fn set_transcription_provider(
 // ============================================================================
 // WORKSPACE INDEX COMMANDS
 // ============================================================================
+
+/// Sensitive directories that should never be indexed for security reasons
+const BLOCKED_DIRECTORIES: &[&str] = &[
+    ".ssh",
+    ".gnupg",
+    ".gpg",
+    ".aws",
+    ".kube",
+    ".docker",
+    ".npm",
+    ".cargo/credentials",
+    ".config/gcloud",
+    "Library/Keychains",
+];
+
+/// Validate that a path is safe to index
+fn validate_workspace_path(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    // Canonicalize to resolve symlinks and get absolute path
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve path: {}", e))?;
+
+    // Get home directory
+    let home_dir = dirs::home_dir().ok_or("Could not determine home directory")?;
+
+    // Path must be under home directory (security: prevent indexing system dirs)
+    if !canonical.starts_with(&home_dir) {
+        return Err(format!(
+            "Workspace must be within your home directory: {}",
+            home_dir.display()
+        ));
+    }
+
+    // Check against blocked directories
+    let relative_to_home = canonical
+        .strip_prefix(&home_dir)
+        .map_err(|_| "Path is not under home directory")?;
+
+    let path_str = relative_to_home.to_string_lossy();
+    for blocked in BLOCKED_DIRECTORIES {
+        if path_str.starts_with(blocked) || path_str.contains(&format!("/{}/", blocked)) {
+            return Err(format!(
+                "Cannot index sensitive directory: {}",
+                blocked
+            ));
+        }
+    }
+
+    Ok(canonical)
+}
 
 /// Set the workspace root and build the file index
 #[tauri::command]
@@ -785,9 +1061,12 @@ fn set_workspace_root(
         return Err(format!("Path is not a directory: {}", path));
     }
 
-    println!("[WORKSPACE] Building index for: {}", path);
+    // Validate path security (canonicalize, check boundaries, block sensitive dirs)
+    let validated_path = validate_workspace_path(workspace_path)?;
 
-    match ide::file_index::WorkspaceIndex::build(workspace_path) {
+    println!("[WORKSPACE] Building index for: {}", validated_path.display());
+
+    match ide::file_index::WorkspaceIndex::build(&validated_path) {
         Ok(index) => {
             let file_count = index.file_count();
             let files_skipped = index.files_skipped;
@@ -795,7 +1074,7 @@ fn set_workspace_root(
             println!("[WORKSPACE] Index built: {} files indexed, {} skipped", file_count, files_skipped);
             Ok(WorkspaceIndexStatus {
                 indexed: true,
-                root: Some(path),
+                root: Some(validated_path.to_string_lossy().to_string()),
                 file_count,
                 files_skipped,
             })
@@ -843,72 +1122,11 @@ pub struct WorkspaceIndexStatus {
     pub files_skipped: usize,
 }
 
-/// Try to auto-detect a workspace root from the current directory.
-/// Walks up from the current directory looking for project markers.
-fn auto_detect_workspace() -> Option<std::path::PathBuf> {
-    use std::path::Path;
-
-    // Project markers that indicate a workspace root
-    const PROJECT_MARKERS: &[&str] = &[
-        ".git",
-        "package.json",
-        "Cargo.toml",
-        "pyproject.toml",
-        "go.mod",
-        "pom.xml",
-        "build.gradle",
-        ".project",
-    ];
-
-    // Start from current directory
-    let mut current = std::env::current_dir().ok()?;
-
-    // Walk up looking for project markers (max 10 levels)
-    for _ in 0..10 {
-        for marker in PROJECT_MARKERS {
-            if current.join(marker).exists() {
-                println!("[WORKSPACE] Auto-detected project root: {} (found {})",
-                    current.display(), marker);
-                return Some(current);
-            }
-        }
-
-        // Move up one directory
-        if !current.pop() {
-            break;
-        }
-    }
-
-    None
-}
-
-/// Build workspace index from auto-detected or configured path
-fn initialize_workspace_index(state: &AppState) {
-    // Try to auto-detect workspace
-    if let Some(workspace_path) = auto_detect_workspace() {
-        match ide::file_index::WorkspaceIndex::build(&workspace_path) {
-            Ok(index) => {
-                let file_count = index.file_count();
-                println!("[WORKSPACE] Auto-indexed {} files from {}",
-                    file_count, workspace_path.display());
-                state.set_workspace_index(Some(index));
-            }
-            Err(e) => {
-                println!("[WORKSPACE] Failed to build auto-detected index: {}", e);
-            }
-        }
-    } else {
-        println!("[WORKSPACE] No workspace auto-detected - file tagging disabled until workspace is set");
-    }
-}
-
 /// Insert text directly at cursor position
 /// Uses AppleScript keystroke for ASCII, clipboard paste for Unicode
 fn insert_text_directly(text: &str) {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
-
         // Check if text contains non-ASCII characters (Unicode)
         let has_unicode = text.chars().any(|c| !c.is_ascii());
 
@@ -925,15 +1143,23 @@ fn insert_text_directly(text: &str) {
     }
 }
 
+/// Escape text for safe inclusion in AppleScript double-quoted strings.
+/// Handles all characters that could break out of the string or cause injection.
+#[cfg(target_os = "macos")]
+fn escape_applescript_string(text: &str) -> String {
+    text.replace("\\", "\\\\")      // Backslash must be first
+        .replace("\"", "\\\"")       // Double quotes
+        .replace("\r", "")           // Remove carriage returns (handled separately)
+        .replace("\t", "\" & tab & \"") // Tabs as AppleScript concatenation
+}
+
 /// Insert ASCII text using AppleScript keystroke (doesn't touch clipboard)
 #[cfg(target_os = "macos")]
 fn insert_via_keystroke(text: &str) {
     use std::process::Command;
 
-    // Escape text for AppleScript string
-    let escaped_text = text
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"");
+    // Escape text for AppleScript string using robust escaping
+    let escaped_text = escape_applescript_string(text);
 
     // Use keystroke to type text directly
     let script = if text.contains('\n') {
@@ -942,7 +1168,7 @@ fn insert_via_keystroke(text: &str) {
         let mut script_parts = Vec::new();
 
         for (i, line) in lines.iter().enumerate() {
-            let escaped_line = line.replace("\\", "\\\\").replace("\"", "\\\"");
+            let escaped_line = escape_applescript_string(line);
             if !escaped_line.is_empty() {
                 script_parts.push(format!("keystroke \"{}\"", escaped_line));
             }
@@ -998,10 +1224,8 @@ end tell"#,
 fn insert_via_clipboard_preserving(text: &str) {
     use std::process::Command;
 
-    // Escape text for AppleScript string (need to escape backslashes and quotes)
-    let escaped_text = text
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"");
+    // Escape text for AppleScript string using robust escaping
+    let escaped_text = escape_applescript_string(text);
 
     // AppleScript that:
     // 1. Saves current clipboard
@@ -1155,10 +1379,80 @@ fn setup_system_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Parse a hotkey string like "Cmd+Shift+D" or "Option+Space" into a Shortcut
-fn parse_hotkey(hotkey: &str) -> Option<Shortcut> {
+/// Get the key code for a single key name (used by parse_hotkey)
+fn get_key_code(key: &str) -> Option<tauri_plugin_global_shortcut::Code> {
     use tauri_plugin_global_shortcut::Code;
 
+    // Letters a-z
+    if key.len() == 1 {
+        let c = key.chars().next()?;
+        return match c {
+            'a' => Some(Code::KeyA),
+            'b' => Some(Code::KeyB),
+            'c' => Some(Code::KeyC),
+            'd' => Some(Code::KeyD),
+            'e' => Some(Code::KeyE),
+            'f' => Some(Code::KeyF),
+            'g' => Some(Code::KeyG),
+            'h' => Some(Code::KeyH),
+            'i' => Some(Code::KeyI),
+            'j' => Some(Code::KeyJ),
+            'k' => Some(Code::KeyK),
+            'l' => Some(Code::KeyL),
+            'm' => Some(Code::KeyM),
+            'n' => Some(Code::KeyN),
+            'o' => Some(Code::KeyO),
+            'p' => Some(Code::KeyP),
+            'q' => Some(Code::KeyQ),
+            'r' => Some(Code::KeyR),
+            's' => Some(Code::KeyS),
+            't' => Some(Code::KeyT),
+            'u' => Some(Code::KeyU),
+            'v' => Some(Code::KeyV),
+            'w' => Some(Code::KeyW),
+            'x' => Some(Code::KeyX),
+            'y' => Some(Code::KeyY),
+            'z' => Some(Code::KeyZ),
+            '0' => Some(Code::Digit0),
+            '1' => Some(Code::Digit1),
+            '2' => Some(Code::Digit2),
+            '3' => Some(Code::Digit3),
+            '4' => Some(Code::Digit4),
+            '5' => Some(Code::Digit5),
+            '6' => Some(Code::Digit6),
+            '7' => Some(Code::Digit7),
+            '8' => Some(Code::Digit8),
+            '9' => Some(Code::Digit9),
+            _ => None,
+        };
+    }
+
+    // Multi-character keys
+    match key {
+        "space" => Some(Code::Space),
+        "f1" => Some(Code::F1),
+        "f2" => Some(Code::F2),
+        "f3" => Some(Code::F3),
+        "f4" => Some(Code::F4),
+        "f5" => Some(Code::F5),
+        "f6" => Some(Code::F6),
+        "f7" => Some(Code::F7),
+        "f8" => Some(Code::F8),
+        "f9" => Some(Code::F9),
+        "f10" => Some(Code::F10),
+        "f11" => Some(Code::F11),
+        "f12" => Some(Code::F12),
+        "escape" | "esc" => Some(Code::Escape),
+        "enter" | "return" => Some(Code::Enter),
+        "tab" => Some(Code::Tab),
+        "backspace" => Some(Code::Backspace),
+        "delete" => Some(Code::Delete),
+        _ => None,
+    }
+}
+
+/// Parse a hotkey string like "Cmd+Shift+D" or "Option+Space" into a Shortcut
+fn parse_hotkey(hotkey: &str) -> Option<Shortcut> {
     let parts: Vec<&str> = hotkey.split('+').map(|s| s.trim()).collect();
     if parts.is_empty() {
         return None;
@@ -1168,73 +1462,25 @@ fn parse_hotkey(hotkey: &str) -> Option<Shortcut> {
     let mut key_code = None;
 
     for part in parts {
-        match part.to_lowercase().as_str() {
+        let lower = part.to_lowercase();
+        match lower.as_str() {
+            // Modifiers
             "cmd" | "command" | "super" | "meta" => modifiers |= Modifiers::SUPER,
             "ctrl" | "control" => modifiers |= Modifiers::CONTROL,
             "alt" | "option" => modifiers |= Modifiers::ALT,
             "shift" => modifiers |= Modifiers::SHIFT,
             "fn" => {
-                // Fn key is not supported as a modifier in global shortcuts
-                // We'll ignore it and use the other parts
+                #[cfg(debug_assertions)]
                 println!("Warning: Fn key is not supported in global shortcuts, ignoring");
             }
-            // Key codes
-            "space" => key_code = Some(Code::Space),
-            "a" => key_code = Some(Code::KeyA),
-            "b" => key_code = Some(Code::KeyB),
-            "c" => key_code = Some(Code::KeyC),
-            "d" => key_code = Some(Code::KeyD),
-            "e" => key_code = Some(Code::KeyE),
-            "f" => key_code = Some(Code::KeyF),
-            "g" => key_code = Some(Code::KeyG),
-            "h" => key_code = Some(Code::KeyH),
-            "i" => key_code = Some(Code::KeyI),
-            "j" => key_code = Some(Code::KeyJ),
-            "k" => key_code = Some(Code::KeyK),
-            "l" => key_code = Some(Code::KeyL),
-            "m" => key_code = Some(Code::KeyM),
-            "n" => key_code = Some(Code::KeyN),
-            "o" => key_code = Some(Code::KeyO),
-            "p" => key_code = Some(Code::KeyP),
-            "q" => key_code = Some(Code::KeyQ),
-            "r" => key_code = Some(Code::KeyR),
-            "s" => key_code = Some(Code::KeyS),
-            "t" => key_code = Some(Code::KeyT),
-            "u" => key_code = Some(Code::KeyU),
-            "v" => key_code = Some(Code::KeyV),
-            "w" => key_code = Some(Code::KeyW),
-            "x" => key_code = Some(Code::KeyX),
-            "y" => key_code = Some(Code::KeyY),
-            "z" => key_code = Some(Code::KeyZ),
-            "1" => key_code = Some(Code::Digit1),
-            "2" => key_code = Some(Code::Digit2),
-            "3" => key_code = Some(Code::Digit3),
-            "4" => key_code = Some(Code::Digit4),
-            "5" => key_code = Some(Code::Digit5),
-            "6" => key_code = Some(Code::Digit6),
-            "7" => key_code = Some(Code::Digit7),
-            "8" => key_code = Some(Code::Digit8),
-            "9" => key_code = Some(Code::Digit9),
-            "0" => key_code = Some(Code::Digit0),
-            "f1" => key_code = Some(Code::F1),
-            "f2" => key_code = Some(Code::F2),
-            "f3" => key_code = Some(Code::F3),
-            "f4" => key_code = Some(Code::F4),
-            "f5" => key_code = Some(Code::F5),
-            "f6" => key_code = Some(Code::F6),
-            "f7" => key_code = Some(Code::F7),
-            "f8" => key_code = Some(Code::F8),
-            "f9" => key_code = Some(Code::F9),
-            "f10" => key_code = Some(Code::F10),
-            "f11" => key_code = Some(Code::F11),
-            "f12" => key_code = Some(Code::F12),
-            "escape" | "esc" => key_code = Some(Code::Escape),
-            "enter" | "return" => key_code = Some(Code::Enter),
-            "tab" => key_code = Some(Code::Tab),
-            "backspace" => key_code = Some(Code::Backspace),
-            "delete" => key_code = Some(Code::Delete),
+            // Key codes - use lookup function
             _ => {
-                println!("Unknown key: {}", part);
+                if let Some(code) = get_key_code(&lower) {
+                    key_code = Some(code);
+                } else {
+                    #[cfg(debug_assertions)]
+                    println!("Unknown key: {}", part);
+                }
             }
         }
     }
@@ -1288,15 +1534,14 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
     // Default to Dictation mode (switches to Command when selection detected)
     state.set_state(RecordingState::Recording);
     state.set_mode(DictationMode::Dictation);
-    if let Ok(mut start) = state.recording_start.lock() {
-        *start = Some(std::time::Instant::now());
-    }
+    state.set_recording_start(Some(std::time::Instant::now()));
 
     // Show overlay IMMEDIATELY - no blocking operations before this
     if let Some(overlay) = app_handle.get_webview_window("overlay") {
-        position_overlay_center_bottom(&overlay, 300);
+        position_overlay_center_bottom(&overlay, OVERLAY_BOTTOM_OFFSET);
         let _ = overlay.show();
     }
+    #[cfg(debug_assertions)]
     println!("[TIMING] Hotkey-to-overlay: {:?}", hotkey_start.elapsed());
 
     // Emit initial state (Dictation mode)
@@ -1319,6 +1564,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
 
         let selection_start = std::time::Instant::now();
         let selection = platform::selection::get_selected_text().ok();
+        #[cfg(debug_assertions)]
         println!(
             "[TIMING] get_selected_text (async): {:?} - {} chars",
             selection_start.elapsed(),
@@ -1335,6 +1581,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
                     &state,
                     Some("Command Mode".to_string()),
                 );
+                #[cfg(debug_assertions)]
                 println!("[MODE] Switched to Command Mode");
             }
         }
@@ -1387,6 +1634,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
         };
 
         let is_ide = bundle_id.as_ref().map(|b| ide::is_ide(b)).unwrap_or(false);
+        #[cfg(debug_assertions)]
         println!(
             "Context processed (async): style={} ({}), bundle={:?}, is_ide={}",
             active_style.name, active_style.id, bundle_id, is_ide
@@ -1409,375 +1657,32 @@ fn shortcut_stop_recording(app_handle: AppHandle) {
         // Check if we can stop
         let current_state = state.get_state();
         if !current_state.can_stop_recording() {
+            #[cfg(debug_assertions)]
             println!("Cannot stop recording from state: {:?}", current_state);
             return;
         }
 
-        // Update state to transcribing
-        state.set_state(RecordingState::Transcribing);
-        emit_state_change(
-            &app_handle_clone,
-            &state,
-            Some("Processing audio...".to_string()),
-        );
-
-        // Get configuration first to determine which audio format we need
-        let (provider, deepgram_key, groq_key, anthropic_key, claude_model, language, spoken_languages) = {
-            let config = match state.config.lock() {
-                Ok(c) => c,
-                Err(e) => {
-                    println!("Failed to lock config: {}", e);
-                    state.set_state(RecordingState::Error);
-                    hide_overlay(&app_handle_clone);
-                    return;
-                }
-            };
-
-            // Load spoken languages from stored preferences
-            let stored = config::StoredPreferences::load();
-            let spoken_langs = stored.spoken_languages.unwrap_or_else(|| vec!["en".to_string()]);
-
-            (
-                config.transcription_provider.clone(),
-                config.deepgram_api_key.clone(),
-                config.groq_api_key.clone(),
-                config.anthropic_api_key.clone(),
-                config.claude_model.clone(),
-                config.language.clone(),
-                spoken_langs,
-            )
-        };
-
-        // Stop recording and get audio data in the appropriate format
-        let (audio_wav, audio_samples_16khz) = {
-            let mut recorder = match state.recorder.lock() {
-                Ok(r) => r,
-                Err(e) => {
-                    println!("Failed to lock recorder: {}", e);
-                    state.set_state(RecordingState::Error);
-                    return;
-                }
-            };
-
-            match provider {
-                TranscriptionProvider::Deepgram => {
-                    match recorder.stop_recording() {
-                        Ok(wav) => (wav, Vec::new()),
-                        Err(e) => {
-                            println!("Failed to stop recording: {}", e);
-                            state.set_state(RecordingState::Error);
-                            hide_overlay(&app_handle_clone);
-                            return;
-                        }
-                    }
-                }
-                TranscriptionProvider::WhisperApi | TranscriptionProvider::WhisperLocal => {
-                    match recorder.stop_recording_for_whisper() {
-                        Ok(samples) => (Vec::new(), samples),
-                        Err(e) => {
-                            println!("Failed to stop recording: {}", e);
-                            state.set_state(RecordingState::Error);
-                            hide_overlay(&app_handle_clone);
-                            return;
-                        }
-                    }
-                }
-            }
-        };
-
-        // Check if we have audio
-        let has_audio = match provider {
-            TranscriptionProvider::Deepgram => !audio_wav.is_empty(),
-            _ => !audio_samples_16khz.is_empty(),
-        };
-
-        if !has_audio {
-            state.set_state(RecordingState::Error);
-            emit_error(&app_handle_clone, ErrorEvent::no_audio_captured());
-            hide_overlay(&app_handle_clone);
-            return;
-        }
-
-        // Transcribe using the configured provider
-        emit_state_change(
-            &app_handle_clone,
-            &state,
-            Some("Transcribing...".to_string()),
-        );
-
-        let transcript = match &provider {
-            TranscriptionProvider::Deepgram => {
-                let api_key = match deepgram_key {
-                    Some(k) => k,
-                    None => {
-                        println!("Deepgram API key not configured");
-                        state.set_state(RecordingState::Error);
-                        emit_error(&app_handle_clone, ErrorEvent::no_transcription_provider());
-                        hide_overlay(&app_handle_clone);
-                        return;
-                    }
-                };
-                let client = DeepgramClient::new(api_key, Some(language.clone()));
-                match client.transcribe_audio(audio_wav).await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        state.set_state(RecordingState::Error);
-                        emit_error(&app_handle_clone, ErrorEvent::deepgram_error(&e));
-                        hide_overlay(&app_handle_clone);
-                        return;
-                    }
-                }
-            }
-            TranscriptionProvider::WhisperApi => {
-                let wav = match encode_samples_to_wav(&audio_samples_16khz, 16000) {
-                    Ok(w) => w,
-                    Err(e) => {
-                        println!("Failed to encode WAV: {}", e);
-                        state.set_state(RecordingState::Error);
-                        hide_overlay(&app_handle_clone);
-                        return;
-                    }
-                };
-                // WhisperApiClient uses groq_api_key from config or GROQ_API_KEY env var
-                let client = whisper_api::WhisperApiClient::new(groq_key.clone().unwrap_or_default());
-                match client.transcribe(&wav, &language, &spoken_languages).await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        state.set_state(RecordingState::Error);
-                        emit_error(&app_handle_clone, ErrorEvent::whisper_error(&e));
-                        hide_overlay(&app_handle_clone);
-                        return;
-                    }
-                }
-            }
-            TranscriptionProvider::WhisperLocal => {
-                if !model_manager::is_model_downloaded() {
-                    println!("Whisper model not downloaded");
-                    state.set_state(RecordingState::Error);
-                    emit_error(&app_handle_clone, ErrorEvent::model_not_loaded());
-                    hide_overlay(&app_handle_clone);
-                    return;
-                }
-                match whisper_local::WhisperLocalClient::transcribe(&audio_samples_16khz, &language).await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        state.set_state(RecordingState::Error);
-                        emit_error(&app_handle_clone, ErrorEvent::whisper_error(&e));
-                        hide_overlay(&app_handle_clone);
-                        return;
-                    }
-                }
-            }
-        };
-
-        if transcript.is_empty() {
-            state.set_state(RecordingState::Error);
-            emit_error(&app_handle_clone, ErrorEvent::no_audio_captured());
-            hide_overlay(&app_handle_clone);
-            return;
-        }
-
-        println!("Transcript ({}): {}", provider.to_string(), transcript);
-
-        // Apply IDE transformations if we're in a code editor
-        let active_bundle_id = state.get_active_bundle_id();
-        let workspace_index = state.get_workspace_index();
-        let transcript = if let Some(ref bundle_id) = active_bundle_id {
-            if ide::is_ide(bundle_id) {
-                let ide_context = ide::get_ide_context(bundle_id);
-                let ide_settings = ide::IDESettings::default();
-
-                // Pass workspace index if available - file tagging only works with an index
-                let transformed = ide::apply_ide_transformations(
-                    &transcript,
-                    &ide_context,
-                    &ide_settings,
-                    workspace_index.as_ref(),
-                );
-
-                if transformed != transcript {
-                    println!("IDE transformed: {}", transformed);
-                }
-                transformed
-            } else {
-                transcript
-            }
-        } else {
-            transcript
-        };
-
-        // Get the current mode, selected text, and active style
-        let current_mode = state.get_mode();
-        let selected_text_for_transform = state.get_selected_text();
-        let active_style = state.get_active_style();
-
-        // Process based on mode
-        let final_text = match current_mode {
-            DictationMode::Command => {
-                // Selection detected - but is this a command or new content?
-                // Use LLM to classify intent before deciding how to process
-
-                let selected_text = match selected_text_for_transform {
-                    Some(text) => text,
-                    None => {
-                        // This shouldn't happen, but fall back to dictation
-                        println!("Command Mode but no selected text, falling back to raw transcript");
-                        transcript.clone()
-                    }
-                };
-
-                let groq_client = GroqLlmClient::new(groq_key.clone().unwrap_or_default());
-
-                // First, classify intent: is this a command or new content?
-                state.set_state(RecordingState::Transforming);
-                emit_state_change(&app_handle_clone, &state, Some("Analyzing...".to_string()));
-
-                let intent = match groq_client.classify_intent(&transcript).await {
-                    Ok(i) => i,
-                    Err(e) => {
-                        println!("Intent classification failed, defaulting to Dictation: {}", e);
-                        UserIntent::Dictation // Default to dictation on error - safer UX
-                    }
-                };
-
-                match intent {
-                    UserIntent::Command => {
-                        // User wants to transform the selected text
-                        emit_state_change(&app_handle_clone, &state, Some("Transforming...".to_string()));
-
-                        match groq_client.transform_text(&selected_text, &transcript).await {
-                            Ok(transformed) => {
-                                println!("Transformed text: {}", transformed);
-                                transformed
-                            }
-                            Err(e) => {
-                                println!("Transformation failed, keeping original: {}", e);
-                                emit_error(
-                                    &app_handle_clone,
-                                    ErrorEvent::groq_error(&e, Some(selected_text.clone())),
-                                );
-                                // On error, keep the original selected text
-                                selected_text
-                            }
-                        }
-                    }
-                    UserIntent::Dictation => {
-                        // User wants to replace selection with new dictated content
-                        // Enhance the transcript and use it to replace the selection
-                        println!("Intent: Dictation - will replace selection with new content");
-                        emit_state_change(&app_handle_clone, &state, Some("Enhancing...".to_string()));
-
-                        // Get style prompt modifier (if style was captured)
-                        let style_prompt = active_style.as_ref().map(|s| {
-                            println!("Applying style: {} ({})", s.name, s.id);
-                            s.prompt_modifier.as_str()
-                        });
-
-                        match groq_client.enhance_text(&transcript, style_prompt).await {
-                            Ok(enhanced) => {
-                                println!("Enhanced dictation (replacing selection): {}", enhanced);
-                                enhanced
-                            }
-                            Err(e) => {
-                                println!("Enhancement failed, using raw transcript: {}", e);
-                                emit_error(
-                                    &app_handle_clone,
-                                    ErrorEvent::groq_error(&e, Some(transcript.clone())),
-                                );
-                                transcript.clone()
-                            }
-                        }
-                    }
-                }
-            }
-            DictationMode::Dictation => {
-                // Dictation Mode: enhance transcription with context-aware style
-                state.set_state(RecordingState::Enhancing);
-                emit_state_change(&app_handle_clone, &state, Some("Enhancing...".to_string()));
-
-                // Get style prompt modifier (if style was captured)
-                let style_prompt = active_style.as_ref().map(|s| {
-                    println!("Applying style: {} ({})", s.name, s.id);
-                    s.prompt_modifier.as_str()
+        // Use shared processing logic
+        match process_recording_stop(&app_handle_clone, &state).await {
+            Ok(final_text) => {
+                // Hide overlay, wait for previous app to regain focus, then insert text
+                let app_for_hide = app_handle_clone.clone();
+                std::thread::spawn(move || {
+                    // Brief delay to show "Done!" state
+                    std::thread::sleep(std::time::Duration::from_millis(DONE_DISPLAY_DELAY_MS));
+                    hide_overlay(&app_for_hide);
+                    // Wait for the previous app to regain focus
+                    std::thread::sleep(std::time::Duration::from_millis(APP_FOCUS_WAIT_MS));
+                    // Insert text (this replaces selection in Command Mode, inserts at cursor in Dictation Mode)
+                    insert_text_directly(&final_text);
                 });
-
-                // Use Groq LLM for enhancement (primary), Claude as fallback
-                let groq_client = GroqLlmClient::new(groq_key.clone().unwrap_or_default());
-                println!("Before LLM enhancement: {}", transcript);
-                match groq_client.enhance_text(&transcript, style_prompt).await {
-                    Ok(enhanced) => {
-                        println!("Enhanced with Groq: {}", enhanced);
-                        enhanced
-                    }
-                    Err(groq_error) => {
-                        println!("Groq enhancement failed: {}", groq_error);
-                        // Fallback to Claude if available
-                        if let Some(api_key) = anthropic_key {
-                            let claude_client = ClaudeClient::new(api_key, Some(claude_model));
-                            match claude_client.enhance_text(&transcript, style_prompt).await {
-                                Ok(t) => {
-                                    println!("Fallback enhanced with Claude: {}", t);
-                                    t
-                                }
-                                Err(e) => {
-                                    println!("Claude fallback also failed: {}", e);
-                                    emit_error(
-                                        &app_handle_clone,
-                                        ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
-                                    );
-                                    transcript.clone()
-                                }
-                            }
-                        } else {
-                            emit_error(
-                                &app_handle_clone,
-                                ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
-                            );
-                            transcript.clone()
-                        }
-                    }
-                }
             }
-        };
-
-        // Clean up any punctuation attached to @-tagged filenames
-        // (LLM may add punctuation like "@components.json?" which breaks references)
-        let final_text = ide::file_tagger::cleanup_tagged_punctuation(&final_text);
-
-        // Emit completion
-        let completion_event = TranscriptionCompleteEvent {
-            raw_transcript: transcript,
-            enhanced_text: final_text.clone(),
-            copied_to_clipboard: false,
-        };
-
-        if let Err(e) = app_handle_clone.emit("transcription-complete", &completion_event) {
-            eprintln!("Failed to emit completion: {}", e);
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Recording stop failed: {}", e);
+                // Error state and overlay hiding already handled in process_recording_stop
+            }
         }
-
-        // Reset state
-        state.set_state(RecordingState::Idle);
-        state.set_mode(DictationMode::Dictation);
-        state.set_selected_text(None);
-        state.set_active_style(None);
-        state.set_active_bundle_id(None);
-        if let Ok(mut start) = state.recording_start.lock() {
-            *start = None;
-        }
-        emit_state_change(&app_handle_clone, &state, Some("Done!".to_string()));
-
-        // Hide overlay, wait for previous app to regain focus, then insert text
-        let app_for_hide = app_handle_clone.clone();
-        let text_to_insert = final_text.clone();
-        std::thread::spawn(move || {
-            // Brief delay to show "Done!" state
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            hide_overlay(&app_for_hide);
-            // Wait for the previous app to regain focus
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            // Insert text (this replaces selection in Command Mode, inserts at cursor in Dictation Mode)
-            insert_text_directly(&text_to_insert);
-        });
     });
 }
 
@@ -1916,9 +1821,7 @@ pub fn run() {
             // Register global shortcut
             setup_global_shortcuts(app, &initial_hotkey, &initial_mode)?;
 
-            // NOTE: Workspace indexing disabled - Phase 3 file tagging is incomplete
-            // and doesn't trigger IDE file picker. Re-enable when fixed.
-            // initialize_workspace_index can be called via set_workspace_root command if needed.
+            // NOTE: Workspace auto-indexing disabled - use set_workspace_root command if needed.
 
             // Hide main window on start
             if let Some(window) = app.get_webview_window("main") {
@@ -1928,7 +1831,7 @@ pub fn run() {
             // Pre-position overlay at bottom-center (while hidden)
             // This prevents flash when first shown
             if let Some(overlay) = app.get_webview_window("overlay") {
-                position_overlay_center_bottom(&overlay, 300);
+                position_overlay_center_bottom(&overlay, OVERLAY_BOTTOM_OFFSET);
                 let _ = overlay.hide();
             }
 
@@ -1959,4 +1862,102 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_escape_applescript_string_basic() {
+        // Basic text should pass through unchanged
+        assert_eq!(escape_applescript_string("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_escape_applescript_string_quotes() {
+        // Double quotes should be escaped
+        assert_eq!(escape_applescript_string(r#"say "hello""#), r#"say \"hello\""#);
+    }
+
+    #[test]
+    fn test_escape_applescript_string_backslash() {
+        // Backslashes should be escaped
+        assert_eq!(escape_applescript_string(r"path\to\file"), r"path\\to\\file");
+    }
+
+    #[test]
+    fn test_escape_applescript_string_tabs() {
+        // Tabs should be converted to AppleScript concatenation
+        assert_eq!(escape_applescript_string("col1\tcol2"), r#"col1" & tab & "col2"#);
+    }
+
+    #[test]
+    fn test_escape_applescript_string_carriage_return() {
+        // Carriage returns should be removed
+        assert_eq!(escape_applescript_string("line1\r\nline2"), "line1\nline2");
+    }
+
+    #[test]
+    fn test_escape_applescript_string_complex() {
+        // Complex string with multiple special characters
+        let input = r#"She said "hello\" and left"#;
+        let expected = r#"She said \"hello\\\" and left"#;
+        assert_eq!(escape_applescript_string(input), expected);
+    }
+
+    #[test]
+    fn test_escape_applescript_string_empty() {
+        assert_eq!(escape_applescript_string(""), "");
+    }
+
+    #[test]
+    fn test_escape_applescript_string_unicode() {
+        // Unicode should pass through unchanged
+        assert_eq!(escape_applescript_string("Hello 世界 🌍"), "Hello 世界 🌍");
+    }
+
+    #[test]
+    fn test_validate_workspace_path_home_subdir() {
+        // A directory under home should be valid
+        if let Some(home) = dirs::home_dir() {
+            let test_path = home.join("Projects");
+            if test_path.exists() {
+                let result = validate_workspace_path(&test_path);
+                assert!(result.is_ok(), "Valid home subdir should be accepted");
+            }
+        }
+    }
+
+    #[test]
+    fn test_validate_workspace_path_blocks_ssh() {
+        // .ssh should be blocked
+        if let Some(home) = dirs::home_dir() {
+            let ssh_path = home.join(".ssh");
+            if ssh_path.exists() {
+                let result = validate_workspace_path(&ssh_path);
+                assert!(result.is_err(), ".ssh should be blocked");
+                assert!(result.unwrap_err().contains("sensitive directory"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_validate_workspace_path_blocks_system() {
+        // System directories should be blocked
+        let system_path = std::path::Path::new("/usr");
+        if system_path.exists() {
+            let result = validate_workspace_path(system_path);
+            assert!(result.is_err(), "System directory should be blocked");
+            assert!(result.unwrap_err().contains("home directory"));
+        }
+    }
+
+    #[test]
+    fn test_blocked_directories_list() {
+        // Verify blocked directories list includes critical paths
+        assert!(BLOCKED_DIRECTORIES.contains(&".ssh"));
+        assert!(BLOCKED_DIRECTORIES.contains(&".gnupg"));
+        assert!(BLOCKED_DIRECTORIES.contains(&".aws"));
+    }
 }

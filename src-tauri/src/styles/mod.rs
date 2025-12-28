@@ -48,13 +48,6 @@ pub struct ActiveApp {
     pub name: String,
 }
 
-impl Style {
-    /// Get the style's prompt modifier for the LLM.
-    pub fn get_prompt_modifier(&self) -> &str {
-        &self.prompt_modifier
-    }
-}
-
 /// Get the currently active application.
 pub fn get_active_app() -> Option<ActiveApp> {
     detection::get_active_app()
@@ -73,29 +66,7 @@ pub fn get_current_style() -> Style {
     }
 }
 
-/// Get all available built-in styles.
-pub fn get_all_styles() -> Vec<Style> {
-    builtin::get_all_styles()
-}
-
 /// Get the default style (used when app is not recognized).
 pub fn get_default_style() -> Style {
     builtin::get_default_style()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_style_prompt_modifier() {
-        let style = Style {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            description: "Test style".to_string(),
-            prompt_modifier: "Be concise".to_string(),
-            auto_features: AutoFeatures::default(),
-        };
-        assert_eq!(style.get_prompt_modifier(), "Be concise");
-    }
 }

@@ -334,34 +334,42 @@ impl AudioRecorder {
     }
 
     fn convert_to_wav(&self, samples: &[f32]) -> Result<Vec<u8>, String> {
-        let mut buffer = Vec::new();
+        let result = encode_samples_to_wav(samples, self.sample_rate)?;
+        #[cfg(debug_assertions)]
+        println!("WAV buffer size: {} bytes", result.len());
+        Ok(result)
+    }
+}
 
-        let spec = hound::WavSpec {
-            channels: 1,
-            sample_rate: self.sample_rate,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
+/// Encode f32 audio samples to WAV format.
+/// This is the canonical WAV encoding function used throughout the app.
+pub fn encode_samples_to_wav(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>, String> {
+    let mut buffer = Vec::new();
 
-        {
-            let mut writer = hound::WavWriter::new(std::io::Cursor::new(&mut buffer), spec)
-                .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
 
-            for &sample in samples {
-                let amplitude = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
-                writer
-                    .write_sample(amplitude)
-                    .map_err(|e| format!("Failed to write sample: {}", e))?;
-            }
+    {
+        let mut writer = hound::WavWriter::new(std::io::Cursor::new(&mut buffer), spec)
+            .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
 
+        for &sample in samples {
+            let amplitude = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
             writer
-                .finalize()
-                .map_err(|e| format!("Failed to finalize WAV: {}", e))?;
+                .write_sample(amplitude)
+                .map_err(|e| format!("Failed to write sample: {}", e))?;
         }
 
-        println!("WAV buffer size: {} bytes", buffer.len());
-        Ok(buffer)
+        writer
+            .finalize()
+            .map_err(|e| format!("Failed to finalize WAV: {}", e))?;
     }
+
+    Ok(buffer)
 }
 
 impl Default for AudioRecorder {

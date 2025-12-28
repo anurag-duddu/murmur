@@ -11,7 +11,10 @@ use get_selected_text::get_selected_text as get_selected_text_impl;
 use regex::Regex;
 use std::sync::LazyLock;
 
-/// Static UUID pattern regex - compiled once and reused
+/// Static UUID pattern regex - compiled once and reused.
+/// SAFETY: unwrap() is safe here because the regex is a compile-time constant
+/// that has been validated during development. LazyLock ensures it's only
+/// compiled once on first use.
 static UUID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}").unwrap()
 });
@@ -73,17 +76,6 @@ impl std::fmt::Display for SelectionError {
 
 impl std::error::Error for SelectionError {}
 
-/// Check if any text is currently selected in the frontmost application.
-///
-/// This is a quick check that doesn't return the actual text.
-/// Uses the Accessibility API to query the focused element's selection.
-pub fn has_selection() -> bool {
-    match get_selected_text_impl() {
-        Ok(text) => !text.is_empty(),
-        Err(_) => false,
-    }
-}
-
 /// Get the currently selected text from the frontmost application.
 ///
 /// Uses the macOS Accessibility API exclusively. Does NOT use clipboard.
@@ -124,17 +116,6 @@ pub fn get_selected_text() -> Result<String, SelectionError> {
                 Err(SelectionError::Failed(error_msg))
             }
         }
-    }
-}
-
-/// Get selected text if any, returning None instead of an error if no selection.
-///
-/// This is a convenience wrapper around `get_selected_text()` for cases
-/// where you just want to check if there's a selection without handling errors.
-pub fn get_selected_text_or_none() -> Option<String> {
-    match get_selected_text() {
-        Ok(text) => Some(text),
-        Err(_) => None,
     }
 }
 

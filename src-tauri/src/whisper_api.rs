@@ -5,10 +5,11 @@
 //! - **Native mode**: Strict single-language transcription in native script
 //! - **Mixed mode**: Auto-detect among user's spoken languages, romanized output
 
+use crate::http_client;
+use crate::rate_limit::{check_rate_limit, Service};
 use any_ascii::any_ascii;
 use reqwest::{multipart, Client};
 use serde::Deserialize;
-use std::time::Duration;
 
 const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const WHISPER_MODEL: &str = "whisper-large-v3-turbo";
@@ -42,14 +43,12 @@ pub struct WhisperApiClient {
 }
 
 impl WhisperApiClient {
-    pub fn new(api_key: String) -> Self {
-        WhisperApiClient {
+    pub fn new(api_key: String) -> Result<Self, String> {
+        // Use 120s timeout for audio transcription (can take longer for large files)
+        Ok(WhisperApiClient {
             api_key,
-            client: Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .expect("Failed to create HTTP client"),
-        }
+            client: http_client::create_secure_client_with_timeout(120)?,
+        })
     }
 
     /// Transcribe audio using Groq's Whisper API
@@ -68,6 +67,9 @@ impl WhisperApiClient {
         language: &str,
         spoken_languages: &[String],
     ) -> Result<String, String> {
+        // Check rate limit before making API call
+        check_rate_limit(Service::WhisperApi)?;
+
         println!("Sending audio to Groq Whisper API ({} bytes)...", audio_wav.len());
 
         let api_key = self.get_api_key()?;

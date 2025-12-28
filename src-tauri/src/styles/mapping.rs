@@ -435,11 +435,6 @@ fn infer_style_from_category(app: &ActiveApp) -> Option<&'static str> {
     None
 }
 
-/// Get all default app mappings (for UI display).
-pub fn get_all_mappings() -> Vec<(&'static str, &'static str)> {
-    DEFAULT_MAPPINGS.to_vec()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

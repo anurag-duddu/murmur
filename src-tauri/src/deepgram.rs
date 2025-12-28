@@ -1,3 +1,5 @@
+use crate::http_client;
+use crate::rate_limit::{check_rate_limit, Service};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -29,15 +31,18 @@ pub struct DeepgramClient {
 }
 
 impl DeepgramClient {
-    pub fn new(api_key: String, language: Option<String>) -> Self {
-        DeepgramClient {
+    pub fn new(api_key: String, language: Option<String>) -> Result<Self, String> {
+        Ok(DeepgramClient {
             api_key,
             language: language.unwrap_or_else(|| "en-US".to_string()),
-            client: Client::new(),
-        }
+            client: http_client::create_secure_client()?,
+        })
     }
 
     pub async fn transcribe_audio(&self, audio_data: Vec<u8>) -> Result<String, String> {
+        // Check rate limit before making API call
+        check_rate_limit(Service::Deepgram)?;
+
         let url = "https://api.deepgram.com/v1/listen";
 
         // Build query parameters based on language setting

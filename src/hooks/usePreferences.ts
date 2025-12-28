@@ -1,7 +1,43 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { tauriCommands } from "@/lib/tauri";
 import type { Preferences } from "@/types";
 import { DEFAULT_PREFERENCES } from "@/types";
+
+/**
+ * Deep equality check for Preferences objects.
+ * More reliable than JSON.stringify which can have key ordering issues.
+ */
+function preferencesEqual(a: Preferences, b: Preferences): boolean {
+  // Check primitive fields
+  if (
+    a.recording_mode !== b.recording_mode ||
+    a.hotkey !== b.hotkey ||
+    a.show_indicator !== b.show_indicator ||
+    a.play_sounds !== b.play_sounds ||
+    a.microphone !== b.microphone ||
+    a.language !== b.language ||
+    a.deepgram_api_key !== b.deepgram_api_key ||
+    a.groq_api_key !== b.groq_api_key ||
+    a.anthropic_api_key !== b.anthropic_api_key ||
+    a.transcription_provider !== b.transcription_provider ||
+    a.license_key !== b.license_key ||
+    a.onboarding_complete !== b.onboarding_complete
+  ) {
+    return false;
+  }
+
+  // Check spoken_languages array
+  if (a.spoken_languages.length !== b.spoken_languages.length) {
+    return false;
+  }
+  for (let i = 0; i < a.spoken_languages.length; i++) {
+    if (a.spoken_languages[i] !== b.spoken_languages[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 export function usePreferences() {
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
@@ -31,8 +67,11 @@ export function usePreferences() {
     load();
   }, []);
 
-  // Check if preferences have changed
-  const hasChanges = JSON.stringify(preferences) !== JSON.stringify(originalPrefsRef.current);
+  // Check if preferences have changed using proper deep comparison
+  const hasChanges = useMemo(
+    () => !preferencesEqual(preferences, originalPrefsRef.current),
+    [preferences]
+  );
 
   // Update a single preference
   const updatePreference = useCallback(

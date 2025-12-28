@@ -25,7 +25,7 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 cpal = "0.15"
@@ -54,6 +54,10 @@ regex = "1"                # Pattern matching for selection validation
 walkdir = "2"              # Recursive file walking for workspace indexing
 ignore = "0.4"             # Respects .gitignore when walking files
 fuzzy-matcher = "0.3"      # Fuzzy string matching for file tagging
+
+# Security
+keyring = { version = "3", features = ["apple-native"] }  # Secure credential storage via macOS Keychain
+sha2 = "0.10"              # SHA-256 checksums for model integrity
 
 [dev-dependencies]
 tempfile = "3"             # Temporary directories for testing

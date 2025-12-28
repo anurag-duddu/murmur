@@ -100,41 +100,4 @@ impl WhisperLocalClient {
         WhisperContext::new_with_params(&model_path.to_string_lossy(), params)
             .map_err(|e| format!("Failed to load Whisper model: {}", e))
     }
-
-    /// Check if the model is currently loaded
-    pub async fn is_model_loaded() -> bool {
-        if let Some(context_mutex) = WHISPER_CONTEXT.get() {
-            if let Ok(guard) = context_mutex.try_lock() {
-                return guard.is_some();
-            }
-        }
-        false
-    }
-
-    /// Unload the model from memory
-    pub async fn unload_model() {
-        if let Some(context_mutex) = WHISPER_CONTEXT.get() {
-            let mut guard = context_mutex.lock().await;
-            *guard = None;
-            println!("Whisper model unloaded");
-        }
-    }
-
-    /// Pre-load the model (call at app startup for faster first transcription)
-    pub async fn preload_model() -> Result<(), String> {
-        let model_path = model_manager::get_model_path()
-            .ok_or("Whisper model not downloaded")?;
-
-        let context_mutex = WHISPER_CONTEXT.get_or_init(|| Mutex::new(None));
-        let mut context_guard = context_mutex.lock().await;
-
-        if context_guard.is_none() {
-            println!("Pre-loading Whisper model...");
-            let ctx = Self::load_model(&model_path)?;
-            *context_guard = Some(ctx);
-            println!("Whisper model pre-loaded successfully");
-        }
-
-        Ok(())
-    }
 }

@@ -3,9 +3,10 @@
 //! Uses the Groq API with OpenAI-compatible chat completions format.
 //! Model: llama-3.3-70b-versatile (free tier, 128K context)
 
+use crate::http_client;
+use crate::rate_limit::{check_rate_limit, Service};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 const GROQ_CHAT_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL: &str = "llama-3.3-70b-versatile";
@@ -141,14 +142,11 @@ pub struct GroqLlmClient {
 }
 
 impl GroqLlmClient {
-    pub fn new(api_key: String) -> Self {
-        GroqLlmClient {
+    pub fn new(api_key: String) -> Result<Self, String> {
+        Ok(GroqLlmClient {
             api_key,
-            client: Client::builder()
-                .timeout(Duration::from_secs(30))
-                .build()
-                .expect("Failed to create HTTP client"),
-        }
+            client: http_client::create_secure_client()?,
+        })
     }
 
     /// Get the API key from environment or stored key
@@ -180,6 +178,10 @@ impl GroqLlmClient {
     /// # Returns
     /// UserIntent::Command or UserIntent::Dictation
     pub async fn classify_intent(&self, transcription: &str) -> Result<UserIntent, String> {
+        // Check rate limit before making API call
+        check_rate_limit(Service::Groq)?;
+
+        #[cfg(debug_assertions)]
         println!("Classifying intent for: {}", transcription);
 
         let api_key = self.get_api_key()?;
@@ -227,8 +229,14 @@ impl GroqLlmClient {
         selected_text: &str,
         command: &str,
     ) -> Result<String, String> {
-        println!("Transforming text with Groq LLM...");
-        println!("Command: {}", command);
+        // Check rate limit before making API call
+        check_rate_limit(Service::Groq)?;
+
+        #[cfg(debug_assertions)]
+        {
+            println!("Transforming text with Groq LLM...");
+            println!("Command: {}", command);
+        }
 
         let api_key = self.get_api_key()?;
 
@@ -269,6 +277,9 @@ impl GroqLlmClient {
         transcript: &str,
         style_prompt: Option<&str>,
     ) -> Result<String, String> {
+        // Check rate limit before making API call
+        check_rate_limit(Service::Groq)?;
+
         println!("Enhancing text with Groq LLM...");
 
         let api_key = self.get_api_key()?;
@@ -340,6 +351,7 @@ impl GroqLlmClient {
         // Clean up any accidental quote/code fence wrapping from LLM
         let cleaned = strip_wrapping(&result);
 
+        #[cfg(debug_assertions)]
         println!("Groq LLM result: {}", cleaned);
 
         Ok(cleaned)

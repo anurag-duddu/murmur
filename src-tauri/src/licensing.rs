@@ -1,10 +1,15 @@
 //! License validation using LemonSqueezy API.
 //! Handles both subscription and one-time (lifetime) licenses.
 
-use reqwest::Client;
+use crate::http_client;
+use crate::rate_limit::{check_rate_limit, Service};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+
+/// Maximum number of days a cached license is considered valid without re-validation
+const CACHED_LICENSE_MAX_AGE_DAYS: i64 = 7;
 
 const LEMONSQUEEZY_API_URL: &str = "https://api.lemonsqueezy.com/v1/licenses/validate";
 
@@ -105,6 +110,7 @@ struct LemonSqueezyResponse {
 
 #[derive(Debug, Deserialize)]
 struct LemonSqueezyLicenseKey {
+    #[allow(dead_code)] // Deserialized but not used directly
     status: String,
     #[serde(rename = "user_email")]
     user_email: Option<String>,
@@ -117,7 +123,10 @@ pub async fn validate_license(license_key: &str) -> Result<LicenseInfo, String> 
         return Ok(LicenseInfo::default());
     }
 
-    let client = Client::new();
+    // Check rate limit before making API call
+    check_rate_limit(Service::LicenseValidation)?;
+
+    let client = http_client::create_secure_client()?;
 
     let response = client
         .post(LEMONSQUEEZY_API_URL)
@@ -192,9 +201,39 @@ pub async fn validate_license(license_key: &str) -> Result<LicenseInfo, String> 
     Ok(info)
 }
 
-/// Get cached license info (for offline use)
+/// Get cached license info (for offline use).
+/// Returns invalid if the cached license is older than CACHED_LICENSE_MAX_AGE_DAYS.
 pub fn get_cached_license() -> LicenseInfo {
     let cached = CachedLicense::load();
+
+    // Check if cached license has expired (needs re-validation)
+    if let Some(validated_at) = &cached.validated_at {
+        if let Ok(validated_time) = DateTime::parse_from_rfc3339(validated_at) {
+            let age = Utc::now().signed_duration_since(validated_time);
+            if age.num_days() > CACHED_LICENSE_MAX_AGE_DAYS {
+                // License cache has expired - needs re-validation
+                return LicenseInfo {
+                    tier: LicenseTier::Free, // Downgrade to free until re-validated
+                    license_key: cached.license_key,
+                    valid: false,
+                    error: Some(format!(
+                        "License needs re-validation (last validated {} days ago)",
+                        age.num_days()
+                    )),
+                    ..Default::default()
+                };
+            }
+        }
+    } else if cached.valid && cached.license_key.is_some() {
+        // Has a license but no validation timestamp - needs re-validation
+        return LicenseInfo {
+            tier: LicenseTier::Free,
+            license_key: cached.license_key,
+            valid: false,
+            error: Some("License needs re-validation".to_string()),
+            ..Default::default()
+        };
+    }
 
     LicenseInfo {
         tier: cached.tier,
@@ -204,16 +243,25 @@ pub fn get_cached_license() -> LicenseInfo {
     }
 }
 
-/// Check if user has an active subscription
-pub fn has_subscription() -> bool {
+/// Check if the cached license needs re-validation
+pub fn needs_revalidation() -> bool {
     let cached = CachedLicense::load();
-    cached.valid && cached.tier == LicenseTier::Subscription
-}
 
-/// Check if user has a lifetime license
-pub fn has_lifetime_license() -> bool {
-    let cached = CachedLicense::load();
-    cached.valid && cached.tier == LicenseTier::Lifetime
+    // No license key - no need to validate
+    if cached.license_key.is_none() {
+        return false;
+    }
+
+    // Check validation timestamp
+    if let Some(validated_at) = &cached.validated_at {
+        if let Ok(validated_time) = DateTime::parse_from_rfc3339(validated_at) {
+            let age = Utc::now().signed_duration_since(validated_time);
+            return age.num_days() > CACHED_LICENSE_MAX_AGE_DAYS;
+        }
+    }
+
+    // No timestamp - needs validation
+    true
 }
 
 /// Clear cached license (for logout/deactivation)

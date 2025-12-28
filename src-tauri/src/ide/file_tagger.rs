@@ -13,8 +13,12 @@ use std::sync::LazyLock;
 /// Minimum fuzzy match score to consider a match valid.
 const MIN_MATCH_SCORE: i64 = 50;
 
-/// Maximum number of words to consider as a potential filename.
-const MAX_FILENAME_WORDS: usize = 5;
+// ============================================================================
+// STATIC REGEX PATTERNS
+// SAFETY: All unwrap() calls below are safe because these are compile-time
+// constant regex strings that have been validated during development.
+// LazyLock ensures each regex is compiled exactly once on first use.
+// ============================================================================
 
 /// Pattern for spoken filename with extension: "[word(s)] dot [extension]"
 /// Uses word boundary and limited word count to avoid matching too much context.
@@ -50,6 +54,7 @@ static FUZZY_MATCHER: LazyLock<SkimMatcherV2> = LazyLock::new(SkimMatcherV2::def
 
 /// Pattern to clean up punctuation attached to @-tagged filenames.
 /// Matches @filename.ext followed by punctuation, adds space before punctuation.
+/// SAFETY: unwrap() is safe - compile-time constant regex validated during development.
 static PUNCTUATION_CLEANUP_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     // Match @filename.ext immediately followed by sentence-ending punctuation
     // Group 1 = the @filename.ext, Group 2 = the punctuation
@@ -331,14 +336,6 @@ fn find_best_match<'a>(
     best_match.map(|(file, _)| file)
 }
 
-/// Match a spoken phrase to a file in the index.
-///
-/// Returns the filename if a good match is found.
-pub fn match_spoken_to_file(spoken: &str, index: &WorkspaceIndex) -> Option<String> {
-    let normalized = normalize_spoken_filename(spoken);
-    find_best_match(&normalized, None, index).map(|f| f.name.clone())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,28 +407,6 @@ mod tests {
         assert_eq!(normalize_spoken_filename("auth check"), "authCheck");
         assert_eq!(normalize_spoken_filename("user service"), "userService");
         assert_eq!(normalize_spoken_filename("main"), "main");
-    }
-
-    #[test]
-    fn test_match_spoken_to_file() {
-        let index = create_test_index();
-        let result = match_spoken_to_file("auth check", &index);
-        assert_eq!(result, Some("authCheck.ts".to_string()));
-    }
-
-    #[test]
-    fn test_match_spoken_to_file_no_match() {
-        let index = create_test_index();
-        let result = match_spoken_to_file("nonexistent", &index);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_fuzzy_match() {
-        let index = create_test_index();
-        // "auth" should fuzzy match "authCheck"
-        let result = match_spoken_to_file("auth", &index);
-        assert!(result.is_some());
     }
 
     #[test]

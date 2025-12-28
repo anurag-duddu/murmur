@@ -223,10 +223,18 @@ function updateSpokenLanguagesDisplay() {
   const display = document.getElementById("spoken-languages-display");
   if (!display) return;
 
+  // Clear existing content safely
+  display.textContent = '';
+
   const languages = preferences.spokenLanguages || ["en"];
-  display.innerHTML = languages
-    .map(lang => `<span class="language-chip">${languageNames[lang] || lang}</span>`)
-    .join("");
+  // Use DOM manipulation instead of innerHTML to prevent XSS
+  languages.forEach(lang => {
+    const chip = document.createElement('span');
+    chip.className = 'language-chip';
+    // textContent automatically escapes HTML characters
+    chip.textContent = languageNames[lang] || lang;
+    display.appendChild(chip);
+  });
 }
 
 // Setup spoken languages editor

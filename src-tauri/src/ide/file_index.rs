@@ -74,6 +74,7 @@ pub struct WorkspaceIndex {
     pub files: Vec<FileEntry>,
     /// When the index was built (as Unix timestamp for serialization)
     #[serde(skip)]
+    #[allow(dead_code)] // Used internally, not serialized
     pub updated_at: Option<Instant>,
     /// Number of files that were skipped due to limits
     pub files_skipped: usize,
@@ -167,6 +168,7 @@ impl WorkspaceIndex {
     }
 
     /// Check if the index is empty.
+    #[allow(dead_code)] // Used in tests
     pub fn is_empty(&self) -> bool {
         self.files.is_empty()
     }
@@ -174,6 +176,7 @@ impl WorkspaceIndex {
     /// Find files matching a search query.
     ///
     /// Returns files where the normalized name contains the query.
+    #[allow(dead_code)] // Used in tests
     pub fn find_by_name(&self, query: &str) -> Vec<&FileEntry> {
         let query_lower = query.to_lowercase();
         self.files
@@ -183,6 +186,7 @@ impl WorkspaceIndex {
     }
 
     /// Find files matching an exact normalized name.
+    #[allow(dead_code)] // Used in tests
     pub fn find_exact(&self, name: &str) -> Option<&FileEntry> {
         let name_lower = name.to_lowercase();
         self.files.iter().find(|f| f.name_normalized == name_lower)

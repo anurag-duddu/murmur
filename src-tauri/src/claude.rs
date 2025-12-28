@@ -29,15 +29,16 @@ struct ClaudeContent {
 pub struct ClaudeClient {
     api_key: String,
     model: String,
-    client: Client,
+    client: &'static Client,
 }
 
 impl ClaudeClient {
     pub fn new(api_key: String, model: Option<String>) -> Result<Self, String> {
+        // Use cached client for connection reuse
         Ok(ClaudeClient {
             api_key,
             model: model.unwrap_or_else(|| "claude-3-5-sonnet-20241022".to_string()),
-            client: http_client::create_secure_client()?,
+            client: http_client::get_client()?,
         })
     }
 

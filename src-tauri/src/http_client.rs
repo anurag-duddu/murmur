@@ -1,30 +1,58 @@
 //! Shared HTTP client configuration with secure TLS settings.
 //!
 //! This module provides a pre-configured HTTP client with:
-//! - Explicit TLS validation using rustls
+//! - Native TLS (macOS Security.framework / Windows SChannel)
 //! - HTTPS-only enforcement
 //! - Reasonable timeouts
-//! - Connection pooling
+//! - Connection pooling and reuse via global cached clients
 
 use reqwest::Client;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 /// Default timeout for API requests (30 seconds)
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
+/// Extended timeout for audio transcription (120 seconds)
+const TRANSCRIPTION_TIMEOUT_SECS: u64 = 120;
+
+/// Global cached client for standard API calls (30s timeout)
+static CACHED_CLIENT: OnceLock<Client> = OnceLock::new();
+
+/// Global cached client for transcription (120s timeout)
+static CACHED_TRANSCRIPTION_CLIENT: OnceLock<Client> = OnceLock::new();
+
+/// Get the shared secure HTTP client (30s timeout).
+/// This reuses connections across requests for better performance.
+pub fn get_client() -> Result<&'static Client, String> {
+    Ok(CACHED_CLIENT.get_or_init(|| {
+        Client::builder()
+            .use_native_tls()
+            .https_only(true)
+            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+            .build()
+            .expect("Failed to create HTTP client - this should never happen")
+    }))
+}
+
+/// Get the shared transcription client (120s timeout).
+/// This reuses connections for transcription requests.
+pub fn get_transcription_client() -> Result<&'static Client, String> {
+    Ok(CACHED_TRANSCRIPTION_CLIENT.get_or_init(|| {
+        Client::builder()
+            .use_native_tls()
+            .https_only(true)
+            .timeout(Duration::from_secs(TRANSCRIPTION_TIMEOUT_SECS))
+            .build()
+            .expect("Failed to create HTTP client - this should never happen")
+    }))
+}
+
 /// Create a secure HTTP client with TLS validation.
-///
-/// This client is configured with:
-/// - Modern TLS (rustls) with built-in root certificates
-/// - HTTPS-only mode (HTTP requests will fail)
-/// - 30-second timeout for requests
-///
-/// # Errors
-/// Returns an error if the client cannot be built (rare, usually system configuration issues).
+/// Note: Prefer get_client() for connection reuse.
 pub fn create_secure_client() -> Result<Client, String> {
     Client::builder()
-        .use_rustls_tls()
-        .tls_built_in_root_certs(true)
+        .use_native_tls()
         .https_only(true)
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
         .build()
@@ -32,16 +60,10 @@ pub fn create_secure_client() -> Result<Client, String> {
 }
 
 /// Create a secure HTTP client with a custom timeout.
-///
-/// # Arguments
-/// * `timeout_secs` - Timeout in seconds for requests
-///
-/// # Errors
-/// Returns an error if the client cannot be built.
+/// Note: Prefer get_transcription_client() for transcription requests.
 pub fn create_secure_client_with_timeout(timeout_secs: u64) -> Result<Client, String> {
     Client::builder()
-        .use_rustls_tls()
-        .tls_built_in_root_certs(true)
+        .use_native_tls()
         .https_only(true)
         .timeout(Duration::from_secs(timeout_secs))
         .build()

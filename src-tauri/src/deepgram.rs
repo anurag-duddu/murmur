@@ -27,15 +27,16 @@ pub struct DeepgramAlternative {
 pub struct DeepgramClient {
     api_key: String,
     language: String,
-    client: Client,
+    client: &'static Client,
 }
 
 impl DeepgramClient {
     pub fn new(api_key: String, language: Option<String>) -> Result<Self, String> {
+        // Use cached transcription client for connection reuse
         Ok(DeepgramClient {
             api_key,
             language: language.unwrap_or_else(|| "en-US".to_string()),
-            client: http_client::create_secure_client()?,
+            client: http_client::get_transcription_client()?,
         })
     }
 

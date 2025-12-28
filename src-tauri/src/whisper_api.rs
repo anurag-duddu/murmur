@@ -39,15 +39,15 @@ struct GroqSegment {
 
 pub struct WhisperApiClient {
     api_key: String,
-    client: Client,
+    client: &'static Client,
 }
 
 impl WhisperApiClient {
     pub fn new(api_key: String) -> Result<Self, String> {
-        // Use 120s timeout for audio transcription (can take longer for large files)
+        // Use cached transcription client for connection reuse
         Ok(WhisperApiClient {
             api_key,
-            client: http_client::create_secure_client_with_timeout(120)?,
+            client: http_client::get_transcription_client()?,
         })
     }
 

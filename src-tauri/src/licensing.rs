@@ -126,7 +126,8 @@ pub async fn validate_license(license_key: &str) -> Result<LicenseInfo, String> 
     // Check rate limit before making API call
     check_rate_limit(Service::LicenseValidation)?;
 
-    let client = http_client::create_secure_client()?;
+    // Use cached client for connection reuse
+    let client = http_client::get_client()?;
 
     let response = client
         .post(LEMONSQUEEZY_API_URL)

@@ -41,10 +41,12 @@ use state::{DictationMode, ErrorEvent, RecordingState, StateChangeEvent, Transcr
 const OVERLAY_BOTTOM_OFFSET: i32 = 300;
 
 /// How long to display "Done!" state before hiding overlay (ms)
-const DONE_DISPLAY_DELAY_MS: u64 = 300;
+/// Reduced from 300ms for snappier feel while still showing completion
+const DONE_DISPLAY_DELAY_MS: u64 = 100;
 
 /// How long to wait for the target app to regain focus after hiding overlay (ms)
-const APP_FOCUS_WAIT_MS: u64 = 100;
+/// Reduced from 100ms - AppleScript activation is fast
+const APP_FOCUS_WAIT_MS: u64 = 30;
 
 /// Application state - single source of truth
 pub struct AppState {
@@ -352,16 +354,23 @@ async fn stop_recording(app_handle: AppHandle, state: State<'_, AppState>) -> Re
         ));
     }
 
+    // Capture the bundle_id BEFORE processing clears it
+    let bundle_id = state.get_active_bundle_id();
+
     // Use shared processing logic
     let final_text = process_recording_stop(&app_handle, &state).await?;
 
-    // Hide overlay, wait for previous app to regain focus, then insert text
+    // Hide overlay, reactivate previous app, then insert text
     let app_clone = app_handle.clone();
     std::thread::spawn(move || {
         // Brief delay to show "Done!" state
         std::thread::sleep(std::time::Duration::from_millis(DONE_DISPLAY_DELAY_MS));
         hide_overlay(&app_clone);
-        // Wait for the previous app to regain focus
+        // Reactivate the previous app explicitly
+        if let Some(bid) = bundle_id {
+            activate_app_by_bundle_id(&bid);
+        }
+        // Wait for the app to regain focus
         std::thread::sleep(std::time::Duration::from_millis(APP_FOCUS_WAIT_MS));
         // Insert text while preserving clipboard
         insert_text_directly(&final_text);
@@ -1127,18 +1136,31 @@ pub struct WorkspaceIndexStatus {
 fn insert_text_directly(text: &str) {
     #[cfg(target_os = "macos")]
     {
+        // Normalize newlines to spaces - pressing Enter in chat apps sends the message,
+        // which is not the intended behavior for dictation
+        let normalized = text
+            .replace("\r\n", " ")
+            .replace("\r", " ")
+            .replace("\n", " ");
+
+        // Collapse multiple spaces into one
+        let clean_text: String = normalized
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .join(" ");
+
         // Check if text contains non-ASCII characters (Unicode)
-        let has_unicode = text.chars().any(|c| !c.is_ascii());
+        let has_unicode = clean_text.chars().any(|c| !c.is_ascii());
 
         if has_unicode {
             // For Unicode text (Hindi, Telugu, Tamil, etc.), use clipboard paste
             // AppleScript's keystroke command doesn't handle non-ASCII characters
             println!("Inserting Unicode text via clipboard paste...");
-            insert_via_clipboard_preserving(text);
+            insert_via_clipboard_preserving(&clean_text);
         } else {
             // For ASCII-only text, use keystroke (faster, no clipboard impact)
             println!("Inserting ASCII text via keystroke...");
-            insert_via_keystroke(text);
+            insert_via_keystroke(&clean_text);
         }
     }
 }
@@ -1290,6 +1312,51 @@ fn hide_overlay(app: &AppHandle) {
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.hide();
     }
+}
+
+/// Activate an application by its bundle ID using AppleScript.
+/// Uses AppleScript instead of `open -b` to avoid launching new instances.
+/// This is necessary because hiding a menu bar app's overlay doesn't automatically
+/// return focus to the previously active application.
+#[cfg(target_os = "macos")]
+fn activate_app_by_bundle_id(bundle_id: &str) {
+    use std::process::Command;
+
+    // Don't try to activate ourselves - that could cause issues
+    if bundle_id == "com.idstuart.murmur" {
+        return;
+    }
+
+    // Use AppleScript to activate the app - this only activates existing instances,
+    // unlike `open -b` which can launch new ones
+    let script = format!(
+        r#"tell application id "{}" to activate"#,
+        bundle_id.replace("\"", "\\\"")
+    );
+
+    let result = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output();
+
+    match result {
+        Ok(output) => {
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                #[cfg(debug_assertions)]
+                eprintln!("Failed to activate app {}: {}", bundle_id, stderr);
+            }
+        }
+        Err(e) => {
+            #[cfg(debug_assertions)]
+            eprintln!("Failed to run osascript: {}", e);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_app_by_bundle_id(_bundle_id: &str) {
+    // No-op on non-macOS platforms
 }
 
 /// Position overlay window at center-bottom of the primary monitor with offset from bottom
@@ -1662,16 +1729,23 @@ fn shortcut_stop_recording(app_handle: AppHandle) {
             return;
         }
 
+        // Capture the bundle_id BEFORE processing clears it
+        let bundle_id = state.get_active_bundle_id();
+
         // Use shared processing logic
         match process_recording_stop(&app_handle_clone, &state).await {
             Ok(final_text) => {
-                // Hide overlay, wait for previous app to regain focus, then insert text
+                // Hide overlay, reactivate previous app, then insert text
                 let app_for_hide = app_handle_clone.clone();
                 std::thread::spawn(move || {
                     // Brief delay to show "Done!" state
                     std::thread::sleep(std::time::Duration::from_millis(DONE_DISPLAY_DELAY_MS));
                     hide_overlay(&app_for_hide);
-                    // Wait for the previous app to regain focus
+                    // Reactivate the previous app explicitly
+                    if let Some(bid) = bundle_id {
+                        activate_app_by_bundle_id(&bid);
+                    }
+                    // Wait for the app to regain focus
                     std::thread::sleep(std::time::Duration::from_millis(APP_FOCUS_WAIT_MS));
                     // Insert text (this replaces selection in Command Mode, inserts at cursor in Dictation Mode)
                     insert_text_directly(&final_text);

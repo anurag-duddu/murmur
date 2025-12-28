@@ -138,14 +138,15 @@ struct MessageContent {
 
 pub struct GroqLlmClient {
     api_key: String,
-    client: Client,
+    client: &'static Client,
 }
 
 impl GroqLlmClient {
     pub fn new(api_key: String) -> Result<Self, String> {
+        // Use cached client for connection reuse
         Ok(GroqLlmClient {
             api_key,
-            client: http_client::create_secure_client()?,
+            client: http_client::get_client()?,
         })
     }
 

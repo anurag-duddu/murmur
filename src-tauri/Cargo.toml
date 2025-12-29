@@ -43,6 +43,7 @@ any_ascii = "0.3"        # Unicode to ASCII transliteration for romanized output
 # Security - HMAC signing for proxy authentication
 hmac = "0.12"
 sha2 = "0.10"
+rand = "0.8"
 
 # Command Mode - macOS Accessibility API
 get-selected-text = "0.1"  # Get selected text from any app via Accessibility API

@@ -21,6 +21,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
       - name: Install dependencies
         run: npm ci
 
@@ -31,8 +36,7 @@ jobs:
         run: npm run build
 
       - name: Build Rust backend
-        run: cd src-tauri && cargo build --release
-        # Note: Full app bundle with signing happens in release workflow
+        run: cd src-tauri && cargo build
 
   lint:
     runs-on: ubuntu-latest

@@ -13,10 +13,6 @@ on:
 permissions:
   contents: write
 
-env:
-  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
 jobs:
   build-macos:
     runs-on: macos-latest
@@ -47,9 +43,26 @@ jobs:
       - name: Update version in tauri.conf.json
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
-          sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          CONF_FILE="src-tauri/tauri.conf.json"
+          TEMP_FILE=$(mktemp)
 
-      - name: Build Tauri app (unsigned)
+          # Perform the sed replacement
+          sed "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$CONF_FILE" > "$TEMP_FILE"
+
+          # Validate the resulting JSON
+          if ! node -e "JSON.parse(require('fs').readFileSync('$TEMP_FILE', 'utf8'))"; then
+            echo "ERROR: JSON validation failed after version update"
+            echo "=== Temp file contents ==="
+            cat "$TEMP_FILE"
+            rm -f "$TEMP_FILE"
+            exit 1
+          fi
+
+          # JSON is valid, move temp file to target
+          mv "$TEMP_FILE" "$CONF_FILE"
+          echo "Successfully updated version to $VERSION"
+
+      - name: Build Tauri app
         run: npm run tauri build
 
       - name: List build outputs
@@ -67,32 +80,47 @@ jobs:
         id: prepare
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
+          WORKSPACE_DIR="${{ github.workspace }}"
+          BUNDLE_DIR="${WORKSPACE_DIR}/src-tauri/target/release/bundle"
 
           # Find the DMG file (Tauri names it based on version and arch)
-          DMG_FILE=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -1)
-          if [ -n "$DMG_FILE" ]; then
-            cp "$DMG_FILE" "Murmur_${VERSION}_macos.dmg"
-            echo "dmg_path=Murmur_${VERSION}_macos.dmg" >> $GITHUB_OUTPUT
+          DMG_FILE=$(find "${BUNDLE_DIR}/dmg" -name "*.dmg" 2>/dev/null | head -1)
+          if [ -z "$DMG_FILE" ]; then
+            echo "ERROR: No DMG file found in ${BUNDLE_DIR}/dmg"
+            echo "Expected pattern: ${BUNDLE_DIR}/dmg/*.dmg"
+            ls -la "${BUNDLE_DIR}/dmg" 2>/dev/null || echo "Directory does not exist"
+            exit 1
+          fi
+          cp "$DMG_FILE" "${WORKSPACE_DIR}/Murmur_${VERSION}_macos.dmg"
+          echo "dmg_path=Murmur_${VERSION}_macos.dmg" >> $GITHUB_OUTPUT
+
+          # Find the .app bundle
+          APP_DIR=$(find "${BUNDLE_DIR}/macos" -name "*.app" -type d 2>/dev/null | head -1)
+          if [ -z "$APP_DIR" ]; then
+            echo "ERROR: No .app bundle found in ${BUNDLE_DIR}/macos"
+            echo "Expected pattern: ${BUNDLE_DIR}/macos/*.app"
+            ls -la "${BUNDLE_DIR}/macos" 2>/dev/null || echo "Directory does not exist"
+            exit 1
           fi
 
-          # Create tar.gz of the .app bundle for auto-updater
-          APP_DIR=$(find src-tauri/target/release/bundle/macos -name "*.app" -type d | head -1)
-          if [ -n "$APP_DIR" ]; then
-            cd src-tauri/target/release/bundle/macos
-            tar -czf "../../../../../Murmur_${VERSION}_macos.app.tar.gz" "$(basename "$APP_DIR")"
-            cd -
-            echo "app_tar_path=Murmur_${VERSION}_macos.app.tar.gz" >> $GITHUB_OUTPUT
-          fi
+          # Create tar.gz using absolute paths (no cd required)
+          APP_NAME=$(basename "$APP_DIR")
+          tar -C "${BUNDLE_DIR}/macos" -czf "${WORKSPACE_DIR}/Murmur_${VERSION}_macos.app.tar.gz" "$APP_NAME"
+          echo "app_tar_path=Murmur_${VERSION}_macos.app.tar.gz" >> $GITHUB_OUTPUT
 
-          # Check for signature file (if updater signing is configured)
-          if [ -f "src-tauri/target/release/bundle/macos/Murmur.app.tar.gz.sig" ]; then
-            SIGNATURE=$(cat src-tauri/target/release/bundle/macos/Murmur.app.tar.gz.sig)
+          # Dynamically locate signature file based on the app bundle we found
+          # Look for .tar.gz.sig files matching the app name pattern
+          SIGNATURE=""
+          SIG_FILE=$(find "${BUNDLE_DIR}/macos" -name "*.app.tar.gz.sig" 2>/dev/null | head -1)
+          if [ -n "$SIG_FILE" ] && [ -f "$SIG_FILE" ]; then
+            SIGNATURE=$(cat "$SIG_FILE")
+            echo "Found signature file: $SIG_FILE"
           else
-            SIGNATURE=""
+            echo "No signature file found (unsigned build)"
           fi
 
           # Generate update manifest for auto-updater
-          cat > latest.json << EOF
+          cat > "${WORKSPACE_DIR}/latest.json" << EOF
           {
             "version": "$VERSION",
             "notes": "See the release notes on GitHub",

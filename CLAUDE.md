@@ -2,10 +2,27 @@
 
 ## Git Push Authentication
 
-Use the GitHub token from `.env` file to push to the repository:
+For local development, configure git credentials securely:
 
+**Option 1: SSH (recommended)**
 ```bash
-git push https://${GITHUB_TOKEN}@github.com/anurag-duddu/murmur.git main
+git remote set-url origin git@github.com:anurag-duddu/murmur.git
+git push origin main
+```
+
+**Option 2: Git credential helper with environment variable**
+```bash
+# Set token in environment (not in command line to avoid shell history exposure)
+export GITHUB_TOKEN="$(cat .env | grep GITHUB_TOKEN | cut -d'=' -f2)"
+git -c credential.helper='!f() { echo "password=${GITHUB_TOKEN}"; }; f' push origin main
+```
+
+**For CI/GitHub Actions:**
+```yaml
+- name: Push changes
+  run: |
+    git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/anurag-duddu/murmur.git
+    git push origin main
 ```
 
 The token is stored in `.env` as `GITHUB_TOKEN`. Required scopes: `repo`, `workflow`.

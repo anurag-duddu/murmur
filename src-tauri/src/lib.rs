@@ -1806,6 +1806,16 @@ mod tests {
         fn test_escape_applescript_string_unicode() {
             assert_eq!(escape_applescript_string("Hello 世界 🌍"), "Hello 世界 🌍");
         }
+
+        #[test]
+        fn test_escape_applescript_string_ampersand() {
+            // Ampersand is escaped using AppleScript concatenation to prevent injection
+            // "foo & bar" becomes "foo " & "&" & " bar" which in the escaped form is:
+            assert_eq!(
+                escape_applescript_string("foo & bar"),
+                r#"foo " & "&" & " bar"#
+            );
+        }
     }
 
     #[test]

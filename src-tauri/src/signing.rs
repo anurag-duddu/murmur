@@ -49,19 +49,18 @@ pub fn get_api_config() -> (&'static str, &'static str, Option<String>) {
     }
 }
 
-/// Generate a cryptographically secure nonce
+/// Generate a cryptographically secure nonce using a CSPRNG.
+/// The nonce is 32 random bytes (256 bits) hex-encoded.
 pub fn generate_nonce() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use rand::rngs::OsRng;
+    use rand::RngCore;
 
-    // Combine timestamp with random bytes for uniqueness
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    // Use OS-provided CSPRNG for cryptographically secure randomness
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
 
-    // Use simple random generation (Rust's thread_rng isn't available without rand crate)
-    // We'll use the timestamp's nanoseconds as entropy
-    format!("{:x}{:x}", timestamp, timestamp.wrapping_mul(0x5DEECE66D))
+    // Hex-encode the random bytes
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Compute SHA-256 hash of data and return as hex string

@@ -1,5 +1,7 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
+
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

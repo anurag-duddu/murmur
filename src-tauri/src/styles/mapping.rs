@@ -323,7 +323,7 @@ fn get_style_id_for_bundle_id(bundle_id: &str) -> Option<&'static str> {
 /// Keywords that indicate a specific style category.
 /// Each tuple contains (keywords, style_id).
 /// Keywords are matched case-insensitively against app name and bundle ID.
-
+///
 /// Messaging/Chat keywords → casual
 const CASUAL_KEYWORDS: &[&str] = &[
     // Messaging

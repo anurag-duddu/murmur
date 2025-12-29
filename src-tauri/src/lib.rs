@@ -1760,53 +1760,52 @@ pub fn run() {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_escape_applescript_string_basic() {
-        // Basic text should pass through unchanged
-        assert_eq!(escape_applescript_string("hello world"), "hello world");
-    }
+    // AppleScript tests - only run on macOS where the function is available
+    #[cfg(target_os = "macos")]
+    mod applescript_tests {
+        use super::*;
 
-    #[test]
-    fn test_escape_applescript_string_quotes() {
-        // Double quotes should be escaped
-        assert_eq!(escape_applescript_string(r#"say "hello""#), r#"say \"hello\""#);
-    }
+        #[test]
+        fn test_escape_applescript_string_basic() {
+            assert_eq!(escape_applescript_string("hello world"), "hello world");
+        }
 
-    #[test]
-    fn test_escape_applescript_string_backslash() {
-        // Backslashes should be escaped
-        assert_eq!(escape_applescript_string(r"path\to\file"), r"path\\to\\file");
-    }
+        #[test]
+        fn test_escape_applescript_string_quotes() {
+            assert_eq!(escape_applescript_string(r#"say "hello""#), r#"say \"hello\""#);
+        }
 
-    #[test]
-    fn test_escape_applescript_string_tabs() {
-        // Tabs should be converted to AppleScript concatenation
-        assert_eq!(escape_applescript_string("col1\tcol2"), r#"col1" & tab & "col2"#);
-    }
+        #[test]
+        fn test_escape_applescript_string_backslash() {
+            assert_eq!(escape_applescript_string(r"path\to\file"), r"path\\to\\file");
+        }
 
-    #[test]
-    fn test_escape_applescript_string_carriage_return() {
-        // Carriage returns should be removed
-        assert_eq!(escape_applescript_string("line1\r\nline2"), "line1\nline2");
-    }
+        #[test]
+        fn test_escape_applescript_string_tabs() {
+            assert_eq!(escape_applescript_string("col1\tcol2"), r#"col1" & tab & "col2"#);
+        }
 
-    #[test]
-    fn test_escape_applescript_string_complex() {
-        // Complex string with multiple special characters
-        let input = r#"She said "hello\" and left"#;
-        let expected = r#"She said \"hello\\\" and left"#;
-        assert_eq!(escape_applescript_string(input), expected);
-    }
+        #[test]
+        fn test_escape_applescript_string_carriage_return() {
+            assert_eq!(escape_applescript_string("line1\r\nline2"), "line1\nline2");
+        }
 
-    #[test]
-    fn test_escape_applescript_string_empty() {
-        assert_eq!(escape_applescript_string(""), "");
-    }
+        #[test]
+        fn test_escape_applescript_string_complex() {
+            let input = r#"She said "hello\" and left"#;
+            let expected = r#"She said \"hello\\\" and left"#;
+            assert_eq!(escape_applescript_string(input), expected);
+        }
 
-    #[test]
-    fn test_escape_applescript_string_unicode() {
-        // Unicode should pass through unchanged
-        assert_eq!(escape_applescript_string("Hello 世界 🌍"), "Hello 世界 🌍");
+        #[test]
+        fn test_escape_applescript_string_empty() {
+            assert_eq!(escape_applescript_string(""), "");
+        }
+
+        #[test]
+        fn test_escape_applescript_string_unicode() {
+            assert_eq!(escape_applescript_string("Hello 世界 🌍"), "Hello 世界 🌍");
+        }
     }
 
     #[test]

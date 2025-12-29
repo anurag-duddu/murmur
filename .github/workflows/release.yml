@@ -107,13 +107,28 @@ jobs:
           }
           EOF
 
+      - name: Verify release files exist
+        run: |
+          echo "=== Files in current directory ==="
+          ls -la
+          echo "=== Checking expected files ==="
+          VERSION="${{ steps.get-version.outputs.version }}"
+          for f in "Murmur_${VERSION}_macos.dmg" "Murmur_${VERSION}_macos.app.tar.gz" "latest.json"; do
+            if [ -f "$f" ]; then
+              echo "✓ Found: $f ($(du -h "$f" | cut -f1))"
+            else
+              echo "✗ Missing: $f"
+            fi
+          done
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.get-version.outputs.version }}
           name: Murmur v${{ steps.get-version.outputs.version }}
           draft: false
           prerelease: false
+          generate_release_notes: false
           body: |
             ## Murmur v${{ steps.get-version.outputs.version }}
 
@@ -129,5 +144,6 @@ jobs:
             Murmur_${{ steps.get-version.outputs.version }}_macos.dmg
             Murmur_${{ steps.get-version.outputs.version }}_macos.app.tar.gz
             latest.json
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

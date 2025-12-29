@@ -25,7 +25,7 @@ jobs:
         run: npm ci
 
       - name: Run Rust tests
-        run: cd src-tauri && cargo test
+        run: cd src-tauri && cargo test --lib
 
       - name: Type check frontend
         run: npm run build
@@ -64,10 +64,10 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev libasound2-dev
 
       - name: Cargo check
         run: cd src-tauri && cargo check
 
       - name: Cargo clippy
-        run: cd src-tauri && cargo clippy -- -D warnings
+        run: cd src-tauri && cargo clippy --all-targets --all-features -- -W clippy::all

@@ -3,6 +3,14 @@
   "productName": "Murmur",
   "version": "0.1.0",
   "identifier": "com.idstuart.murmur",
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM5MTgzQkI5QkZFMUVFNzAKUldSdzd1Ry91VHNZeWYvSXdZZU5VcC9rNWd1NmZIV1JUZVFVTFBQcTducHVwemZ3U0cwdUplWHgK",
+      "endpoints": [
+        "https://github.com/anurag-duddu/murmur/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

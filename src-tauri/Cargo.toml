@@ -35,10 +35,14 @@ dotenv = "0.15"
 dirs = "5"
 
 # Audio processing
-rubato = "0.15"          # Audio resampling 48kHz→16kHz
+rubato = "0.16.2"        # Audio resampling 48kHz→16kHz
 
 # Utilities
 any_ascii = "0.3"        # Unicode to ASCII transliteration for romanized output
+
+# Security - HMAC signing for proxy authentication
+hmac = "0.12"
+sha2 = "0.10"
 
 # Command Mode - macOS Accessibility API
 get-selected-text = "0.1"  # Get selected text from any app via Accessibility API
@@ -51,4 +55,8 @@ fuzzy-matcher = "0.3"      # Fuzzy string matching for file tagging
 
 [dev-dependencies]
 tempfile = "3"             # Temporary directories for testing
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
 

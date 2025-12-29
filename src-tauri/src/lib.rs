@@ -16,6 +16,7 @@ mod ide;
 mod permissions;
 mod platform;
 mod rate_limit;
+mod signing;
 mod state;
 mod styles;
 mod whisper_api;
@@ -374,7 +375,6 @@ async fn stop_recording(app_handle: AppHandle, state: State<'_, AppState>) -> Re
 
 /// Configuration extracted from app state for recording stop processing
 struct RecordingStopConfig {
-    groq_key: Option<String>,
     language: String,
     spoken_languages: Vec<String>,
 }
@@ -396,7 +396,6 @@ async fn process_recording_stop(
         .unwrap_or_else(|| vec!["en".to_string()]);
 
     let config = state.with_config(|cfg| RecordingStopConfig {
-        groq_key: cfg.groq_api_key.clone(),
         language: cfg.language.clone(),
         spoken_languages: spoken_langs,
     })?;
@@ -418,8 +417,7 @@ async fn process_recording_stop(
     emit_state_change(app_handle, state, Some("Transcribing...".to_string()));
 
     let wav = encode_samples_to_wav(&audio_samples_16khz, 16000)?;
-    let client =
-        whisper_api::WhisperApiClient::new(config.groq_key.clone().unwrap_or_default())?;
+    let client = whisper_api::WhisperApiClient::new()?;
     let transcript = client
         .transcribe(&wav, &config.language, &config.spoken_languages)
         .await
@@ -485,8 +483,7 @@ async fn process_recording_stop(
                 }
             };
 
-            let groq_client =
-                GroqLlmClient::new(config.groq_key.clone().unwrap_or_default())?;
+            let groq_client = GroqLlmClient::new()?;
 
             // Classify intent
             state.set_state(RecordingState::Transforming);
@@ -562,8 +559,7 @@ async fn process_recording_stop(
                 s.prompt_modifier.as_str()
             });
 
-            let groq_client =
-                GroqLlmClient::new(config.groq_key.clone().unwrap_or_default())?;
+            let groq_client = GroqLlmClient::new()?;
 
             #[cfg(debug_assertions)]
             println!("Before LLM enhancement: {}", transcript);
@@ -741,6 +737,29 @@ fn set_selected_microphone(device_id: String) -> Result<(), String> {
     if trimmed.len() > 512 {
         return Err("Device ID is too long".to_string());
     }
+
+    // SECURITY: Validate character set to prevent path traversal and injection
+    // Allow: alphanumeric, spaces, hyphens, underscores, dots, parentheses, colons
+    // (common in device names like "MacBook Pro Microphone (Built-in)")
+    if !trimmed.chars().all(|c| {
+        c.is_alphanumeric()
+            || c == ' '
+            || c == '-'
+            || c == '_'
+            || c == '.'
+            || c == '('
+            || c == ')'
+            || c == ':'
+            || c == '\''
+    }) {
+        return Err("Device ID contains invalid characters".to_string());
+    }
+
+    // SECURITY: Prevent path traversal
+    if trimmed.contains("..") || trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Device ID contains invalid path characters".to_string());
+    }
+
     permissions::set_selected_microphone(trimmed)
 }
 
@@ -766,18 +785,45 @@ fn complete_onboarding(app_handle: AppHandle) -> Result<(), String> {
 // WORKSPACE INDEX COMMANDS
 // ============================================================================
 
-/// Sensitive directories that should never be indexed for security reasons
+/// Sensitive directories that should never be indexed for security reasons.
+/// This list covers common locations for credentials, secrets, and private keys.
 const BLOCKED_DIRECTORIES: &[&str] = &[
+    // SSH and GPG keys
     ".ssh",
     ".gnupg",
     ".gpg",
+    // Cloud provider credentials
     ".aws",
     ".kube",
     ".docker",
+    ".config/gcloud",
+    ".azure",
+    ".config/doctl",
+    // Package manager credentials
     ".npm",
     ".cargo/credentials",
-    ".config/gcloud",
+    ".cargo/credentials.toml",
+    ".pypirc",
+    ".gem/credentials",
+    // macOS keychains
     "Library/Keychains",
+    // Environment and secret files (as directory components)
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.development",
+    // Password managers
+    ".password-store",
+    ".config/1Password",
+    ".config/Bitwarden",
+    // Other sensitive locations
+    ".netrc",
+    ".git-credentials",
+    ".config/gh",  // GitHub CLI
+    ".config/hub", // Hub CLI
+    "credentials",
+    "secrets",
+    ".secrets",
 ];
 
 /// Validate that a path is safe to index
@@ -931,12 +977,20 @@ fn insert_text_directly(text: &str) {
 
 /// Escape text for safe inclusion in AppleScript double-quoted strings.
 /// Handles all characters that could break out of the string or cause injection.
+///
+/// SECURITY: This function prevents AppleScript injection by escaping:
+/// - Backslashes (must be first to avoid double-escaping)
+/// - Double quotes (could break out of string)
+/// - Ampersands (AppleScript concatenation operator - could inject code)
+/// - Carriage returns (removed)
+/// - Tabs (converted to AppleScript tab concatenation)
 #[cfg(target_os = "macos")]
 fn escape_applescript_string(text: &str) -> String {
-    text.replace("\\", "\\\\")      // Backslash must be first
-        .replace("\"", "\\\"")       // Double quotes
-        .replace("\r", "")           // Remove carriage returns (handled separately)
-        .replace("\t", "\" & tab & \"") // Tabs as AppleScript concatenation
+    text.replace("\\", "\\\\")       // Backslash must be first
+        .replace("\"", "\\\"")        // Double quotes
+        .replace("&", "\" & \"&\" & \"") // Escape ampersands to prevent injection
+        .replace("\r", "")            // Remove carriage returns (handled separately)
+        .replace("\t", "\" & tab & \"")  // Tabs as AppleScript concatenation
 }
 
 /// Insert ASCII text using AppleScript keystroke (doesn't touch clipboard)
@@ -1615,6 +1669,15 @@ pub fn run() {
     let initial_mode = config.recording_mode.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // Another instance tried to launch - bring existing app to focus
+            println!("Another instance attempted to start, bringing existing window to focus");
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())

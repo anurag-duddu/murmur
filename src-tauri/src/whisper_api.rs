@@ -7,17 +7,12 @@
 
 use crate::http_client;
 use crate::rate_limit::{check_rate_limit, Service};
+use crate::signing;
 use any_ascii::any_ascii;
 use reqwest::{multipart, Client};
 use serde::Deserialize;
 
-/// Proxy URL for production (keeps API key server-side)
-const PROXY_URL: &str = "https://murmur-proxy.anurag-ebc.workers.dev/whisper";
-/// Direct API URL for development fallback
-const DIRECT_API_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const WHISPER_MODEL: &str = "whisper-large-v3-turbo";
-/// App signature for proxy authentication (prevents unauthorized proxy usage)
-const APP_SIGNATURE: &str = "d8a30062682b1fb12471dfd838779a7b6047e04a54e8ce0d440db87c50eb2411";
 
 /// Response from Groq Whisper API (simple format)
 #[derive(Debug, Deserialize)]
@@ -43,15 +38,13 @@ struct GroqSegment {
 }
 
 pub struct WhisperApiClient {
-    api_key: String,
     client: &'static Client,
 }
 
 impl WhisperApiClient {
-    pub fn new(api_key: String) -> Result<Self, String> {
+    pub fn new() -> Result<Self, String> {
         // Use cached transcription client for connection reuse
         Ok(WhisperApiClient {
-            api_key,
             client: http_client::get_transcription_client()?,
         })
     }
@@ -132,12 +125,17 @@ impl WhisperApiClient {
         let mut request = self.client.post(api_url).multipart(form);
 
         // Add Authorization header only for direct API (dev mode)
-        // Add app signature for proxy mode
+        // Add HMAC signature for proxy mode
         if let Some(key) = api_key {
             request = request.header("Authorization", format!("Bearer {}", key));
         } else {
-            // Production mode: add app signature for proxy authentication
-            request = request.header("X-Murmur-Signature", APP_SIGNATURE);
+            // Production mode: add HMAC signature for proxy authentication
+            // Sign the audio bytes as the request payload
+            let (timestamp, nonce, signature) = signing::sign_request(audio_wav);
+            request = request
+                .header("X-Murmur-Timestamp", timestamp)
+                .header("X-Murmur-Nonce", nonce)
+                .header("X-Murmur-Signature", signature);
         }
 
         let response = request
@@ -202,12 +200,17 @@ impl WhisperApiClient {
         let mut request = self.client.post(api_url).multipart(form);
 
         // Add Authorization header only for direct API (dev mode)
-        // Add app signature for proxy mode
+        // Add HMAC signature for proxy mode
         if let Some(key) = api_key {
             request = request.header("Authorization", format!("Bearer {}", key));
         } else {
-            // Production mode: add app signature for proxy authentication
-            request = request.header("X-Murmur-Signature", APP_SIGNATURE);
+            // Production mode: add HMAC signature for proxy authentication
+            // Sign the audio bytes as the request payload
+            let (timestamp, nonce, signature) = signing::sign_request(audio_wav);
+            request = request
+                .header("X-Murmur-Timestamp", timestamp)
+                .header("X-Murmur-Nonce", nonce)
+                .header("X-Murmur-Signature", signature);
         }
 
         let response = request
@@ -272,22 +275,12 @@ impl WhisperApiClient {
         Ok(romanized)
     }
 
-    /// Get the API URL and optional API key
-    /// Returns (url, Option<api_key>)
-    /// - If GROQ_API_KEY env var is set, use direct API with that key (dev mode)
-    /// - Otherwise, use proxy (production mode, no key needed)
+    /// Get the API URL and optional API key based on build type.
+    /// - Debug builds: use direct API with GROQ_API_KEY
+    /// - Release builds: always use proxy
     fn get_api_config(&self) -> (String, Option<String>) {
-        // Check for dev mode: GROQ_API_KEY env var
-        if let Ok(key) = std::env::var("GROQ_API_KEY") {
-            if !key.is_empty() {
-                println!("Using direct Groq API (dev mode)");
-                return (DIRECT_API_URL.to_string(), Some(key));
-            }
-        }
-
-        // Production mode: use proxy (no API key needed client-side)
-        println!("Using proxy (production mode)");
-        (PROXY_URL.to_string(), None)
+        let (whisper_url, _, api_key) = signing::get_api_config();
+        (whisper_url.to_string(), api_key)
     }
 }
 
@@ -314,76 +307,104 @@ fn romanize_transcript(text: &str) -> String {
     result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Convert language code to full language name (for prompts)
-fn language_code_to_name(code: &str) -> &'static str {
-    match code.split('-').next().unwrap_or(code) {
-        "en" => "English",
-        "hi" => "Hindi",
-        "te" => "Telugu",
-        "ta" => "Tamil",
-        "kn" => "Kannada",
-        "ml" => "Malayalam",
-        "bn" => "Bengali",
-        "mr" => "Marathi",
-        "gu" => "Gujarati",
-        "pa" => "Punjabi",
-        "es" => "Spanish",
-        "fr" => "French",
-        "de" => "German",
-        "it" => "Italian",
-        "pt" => "Portuguese",
-        "nl" => "Dutch",
-        "ja" => "Japanese",
-        "ko" => "Korean",
-        "zh" => "Chinese",
-        "ru" => "Russian",
-        "pl" => "Polish",
-        "tr" => "Turkish",
-        "uk" => "Ukrainian",
-        "vi" => "Vietnamese",
-        "id" => "Indonesian",
-        "th" => "Thai",
-        "sv" => "Swedish",
-        "da" => "Danish",
-        "no" => "Norwegian",
-        "fi" => "Finnish",
-        _ => "Unknown",
-    }
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+/// Language mappings - defined once, used for O(1) lookups in both directions
+static LANGUAGE_CODE_TO_NAME: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+static LANGUAGE_NAME_TO_CODE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+
+/// Initialize language mappings (code -> name and lowercase name -> code)
+fn init_language_maps() -> (HashMap<&'static str, &'static str>, HashMap<&'static str, &'static str>) {
+    let pairs: &[(&str, &str)] = &[
+        ("en", "English"),
+        ("hi", "Hindi"),
+        ("te", "Telugu"),
+        ("ta", "Tamil"),
+        ("kn", "Kannada"),
+        ("ml", "Malayalam"),
+        ("bn", "Bengali"),
+        ("mr", "Marathi"),
+        ("gu", "Gujarati"),
+        ("pa", "Punjabi"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("nl", "Dutch"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("zh", "Chinese"),
+        ("ru", "Russian"),
+        ("pl", "Polish"),
+        ("tr", "Turkish"),
+        ("uk", "Ukrainian"),
+        ("vi", "Vietnamese"),
+        ("id", "Indonesian"),
+        ("th", "Thai"),
+        ("sv", "Swedish"),
+        ("da", "Danish"),
+        ("no", "Norwegian"),
+        ("fi", "Finnish"),
+    ];
+
+    let code_to_name: HashMap<_, _> = pairs.iter().copied().collect();
+    let name_to_code: HashMap<_, _> = pairs
+        .iter()
+        .map(|(code, name)| {
+            // Store lowercase name for case-insensitive lookup
+            let lowercase: &'static str = match *name {
+                "English" => "english",
+                "Hindi" => "hindi",
+                "Telugu" => "telugu",
+                "Tamil" => "tamil",
+                "Kannada" => "kannada",
+                "Malayalam" => "malayalam",
+                "Bengali" => "bengali",
+                "Marathi" => "marathi",
+                "Gujarati" => "gujarati",
+                "Punjabi" => "punjabi",
+                "Spanish" => "spanish",
+                "French" => "french",
+                "German" => "german",
+                "Italian" => "italian",
+                "Portuguese" => "portuguese",
+                "Dutch" => "dutch",
+                "Japanese" => "japanese",
+                "Korean" => "korean",
+                "Chinese" => "chinese",
+                "Russian" => "russian",
+                "Polish" => "polish",
+                "Turkish" => "turkish",
+                "Ukrainian" => "ukrainian",
+                "Vietnamese" => "vietnamese",
+                "Indonesian" => "indonesian",
+                "Thai" => "thai",
+                "Swedish" => "swedish",
+                "Danish" => "danish",
+                "Norwegian" => "norwegian",
+                "Finnish" => "finnish",
+                _ => "unknown",
+            };
+            (lowercase, *code)
+        })
+        .collect();
+
+    (code_to_name, name_to_code)
 }
 
-/// Convert language name (from Whisper response) to code
+/// Convert language code to full language name (for prompts) - O(1) lookup
+fn language_code_to_name(code: &str) -> &'static str {
+    let map = LANGUAGE_CODE_TO_NAME.get_or_init(|| init_language_maps().0);
+    let base_code = code.split('-').next().unwrap_or(code);
+    map.get(base_code).copied().unwrap_or("Unknown")
+}
+
+/// Convert language name (from Whisper response) to code - O(1) lookup
 fn language_name_to_code(name: &str) -> &'static str {
-    match name.to_lowercase().as_str() {
-        "english" => "en",
-        "hindi" => "hi",
-        "telugu" => "te",
-        "tamil" => "ta",
-        "kannada" => "kn",
-        "malayalam" => "ml",
-        "bengali" => "bn",
-        "marathi" => "mr",
-        "gujarati" => "gu",
-        "punjabi" => "pa",
-        "spanish" => "es",
-        "french" => "fr",
-        "german" => "de",
-        "italian" => "it",
-        "portuguese" => "pt",
-        "dutch" => "nl",
-        "japanese" => "ja",
-        "korean" => "ko",
-        "chinese" => "zh",
-        "russian" => "ru",
-        "polish" => "pl",
-        "turkish" => "tr",
-        "ukrainian" => "uk",
-        "vietnamese" => "vi",
-        "indonesian" => "id",
-        "thai" => "th",
-        "swedish" => "sv",
-        "danish" => "da",
-        "norwegian" => "no",
-        "finnish" => "fi",
-        _ => "unknown",
-    }
+    let map = LANGUAGE_NAME_TO_CODE.get_or_init(|| init_language_maps().1);
+    // Create a lowercase version for lookup
+    let lowercase = name.to_lowercase();
+    map.get(lowercase.as_str()).copied().unwrap_or("unknown")
 }

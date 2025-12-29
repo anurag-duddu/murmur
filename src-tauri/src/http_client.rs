@@ -48,49 +48,25 @@ pub fn get_transcription_client() -> Result<&'static Client, String> {
     }))
 }
 
-/// Create a secure HTTP client with TLS validation.
-/// Note: Prefer get_client() for connection reuse.
-#[allow(dead_code)]
-pub fn create_secure_client() -> Result<Client, String> {
-    Client::builder()
-        .use_native_tls()
-        .https_only(true)
-        .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("Failed to create secure HTTP client: {}", e))
-}
-
-/// Create a secure HTTP client with a custom timeout.
-/// Note: Prefer get_transcription_client() for transcription requests.
-#[allow(dead_code)]
-pub fn create_secure_client_with_timeout(timeout_secs: u64) -> Result<Client, String> {
-    Client::builder()
-        .use_native_tls()
-        .https_only(true)
-        .timeout(Duration::from_secs(timeout_secs))
-        .build()
-        .map_err(|e| format!("Failed to create secure HTTP client: {}", e))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_create_secure_client() {
-        let client = create_secure_client();
-        assert!(client.is_ok(), "Failed to create client: {:?}", client);
+    fn test_get_client() {
+        let client = get_client();
+        assert!(client.is_ok(), "Failed to get client: {:?}", client);
     }
 
     #[test]
-    fn test_create_secure_client_with_timeout() {
-        let client = create_secure_client_with_timeout(60);
-        assert!(client.is_ok(), "Failed to create client: {:?}", client);
+    fn test_get_transcription_client() {
+        let client = get_transcription_client();
+        assert!(client.is_ok(), "Failed to get transcription client: {:?}", client);
     }
 
     #[tokio::test]
     async fn test_https_only_enforcement() {
-        let client = create_secure_client().unwrap();
+        let client = get_client().unwrap();
 
         // HTTP request should fail (HTTPS-only)
         let result = client.get("http://example.com").send().await;

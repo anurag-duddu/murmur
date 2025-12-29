@@ -95,12 +95,13 @@ pub fn get_microphone_devices() -> Vec<MicrophoneDevice> {
         .unwrap_or_default();
 
     // Enumerate all input devices
+    // Use device name as ID (stable across sessions, unlike index)
     if let Ok(input_devices) = host.input_devices() {
-        for (index, device) in input_devices.enumerate() {
+        for device in input_devices {
             if let Ok(name) = device.name() {
                 let is_default = name == default_name;
                 devices.push(MicrophoneDevice {
-                    id: format!("device_{}", index),
+                    id: name.clone(), // Use name as ID for stability
                     name,
                     is_default,
                 });
@@ -223,7 +224,7 @@ pub fn set_selected_microphone(device_id: &str) -> Result<(), String> {
 }
 
 /// Get the selected microphone device name
-/// Returns None if no device is selected or "default" is selected
+/// Returns None if no device is selected, "default" is selected, or device no longer exists
 pub fn get_selected_microphone_name() -> Option<String> {
     let config_dir = dirs::config_dir()?.join("murmur");
     let mic_file = config_dir.join("selected_microphone");
@@ -232,18 +233,19 @@ pub fn get_selected_microphone_name() -> Option<String> {
         return None;
     }
 
-    let device_id = std::fs::read_to_string(&mic_file).ok()?;
-    let device_id = device_id.trim();
+    let device_name = std::fs::read_to_string(&mic_file).ok()?;
+    let device_name = device_name.trim();
 
-    if device_id.is_empty() || device_id == "default" {
+    if device_name.is_empty() || device_name == "default" {
         return None;
     }
 
-    // The device_id is something like "device_0", "device_1", etc.
-    // We need to find the corresponding device name
+    // Verify the device still exists (handles unplugged devices)
     let devices = get_microphone_devices();
-    devices
-        .into_iter()
-        .find(|d| d.id == device_id)
-        .map(|d| d.name)
+    if devices.iter().any(|d| d.name == device_name) {
+        Some(device_name.to_string())
+    } else {
+        // Device no longer available, fall back to default
+        None
+    }
 }

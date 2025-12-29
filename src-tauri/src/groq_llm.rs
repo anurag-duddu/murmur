@@ -5,16 +5,11 @@
 
 use crate::http_client;
 use crate::rate_limit::{check_rate_limit, Service};
+use crate::signing;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-/// Proxy URL for production (keeps API key server-side)
-const PROXY_URL: &str = "https://murmur-proxy.anurag-ebc.workers.dev/chat";
-/// Direct API URL for development fallback
-const DIRECT_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL: &str = "llama-3.3-70b-versatile";
-/// App signature for proxy authentication (prevents unauthorized proxy usage)
-const APP_SIGNATURE: &str = "d8a30062682b1fb12471dfd838779a7b6047e04a54e8ce0d440db87c50eb2411";
 
 /// User intent when text is selected
 #[derive(Debug, Clone, PartialEq)]
@@ -142,33 +137,23 @@ struct MessageContent {
 }
 
 pub struct GroqLlmClient {
-    api_key: String,
     client: &'static Client,
 }
 
 impl GroqLlmClient {
-    pub fn new(api_key: String) -> Result<Self, String> {
+    pub fn new() -> Result<Self, String> {
         // Use cached client for connection reuse
         Ok(GroqLlmClient {
-            api_key,
             client: http_client::get_client()?,
         })
     }
 
-    /// Get the API URL and optional API key
-    /// Returns (url, Option<api_key>)
-    /// - If GROQ_API_KEY env var is set, use direct API with that key (dev mode)
-    /// - Otherwise, use proxy (production mode, no key needed)
+    /// Get the API URL and optional API key based on build type.
+    /// - Debug builds: use direct API with GROQ_API_KEY
+    /// - Release builds: always use proxy
     fn get_api_config(&self) -> (String, Option<String>) {
-        // Check for dev mode: GROQ_API_KEY env var
-        if let Ok(key) = std::env::var("GROQ_API_KEY") {
-            if !key.is_empty() {
-                return (DIRECT_API_URL.to_string(), Some(key));
-            }
-        }
-
-        // Production mode: use proxy (no API key needed client-side)
-        (PROXY_URL.to_string(), None)
+        let (_, chat_url, api_key) = signing::get_api_config();
+        (chat_url.to_string(), api_key)
     }
 
     /// Classify user intent: is this a command to transform text, or new content?
@@ -324,22 +309,30 @@ impl GroqLlmClient {
         api_key: Option<&str>,
         request: &ChatRequest,
     ) -> Result<String, String> {
+        // Serialize request body for signing
+        let body_bytes = serde_json::to_vec(request)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?;
+
         let mut http_request = self
             .client
             .post(api_url)
-            .header("Content-Type", "application/json")
-            .json(request);
+            .header("Content-Type", "application/json");
 
         // Add Authorization header only for direct API (dev mode)
-        // Add app signature for proxy mode
+        // Add HMAC signature for proxy mode
         if let Some(key) = api_key {
             http_request = http_request.header("Authorization", format!("Bearer {}", key));
         } else {
-            // Production mode: add app signature for proxy authentication
-            http_request = http_request.header("X-Murmur-Signature", APP_SIGNATURE);
+            // Production mode: add HMAC signature for proxy authentication
+            let (timestamp, nonce, signature) = signing::sign_request(&body_bytes);
+            http_request = http_request
+                .header("X-Murmur-Timestamp", timestamp)
+                .header("X-Murmur-Nonce", nonce)
+                .header("X-Murmur-Signature", signature);
         }
 
         let response = http_request
+            .body(body_bytes)
             .send()
             .await
             .map_err(|e| format!("Failed to send request to Groq: {}", e))?;

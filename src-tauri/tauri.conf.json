@@ -78,8 +78,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "infoPlist": "Info.plist",
-      "signingIdentity": "Apple Development: anuragduddu@icloud.com (K937NTRLN2)"
+      "infoPlist": "Info.plist"
     }
   }
 }

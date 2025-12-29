@@ -15,11 +15,8 @@ env:
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      release_id: ${{ steps.create-release.outputs.id }}
-      version: ${{ steps.get-version.outputs.version }}
+  build-macos:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -31,23 +28,6 @@ jobs:
           else
             echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
-
-      - name: Create Release
-        id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ steps.get-version.outputs.version }}
-          release_name: Murmur v${{ steps.get-version.outputs.version }}
-          draft: true
-          prerelease: false
-
-  build-macos:
-    needs: create-release
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -63,57 +43,52 @@ jobs:
 
       - name: Update version in tauri.conf.json
         run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
+          VERSION="${{ steps.get-version.outputs.version }}"
           sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
 
-      - name: Import Apple certificates
-        if: env.APPLE_CERTIFICATE != ''
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          rm certificate.p12
-
-      - name: Build Tauri app
+      - name: Build Tauri app (unsigned)
         run: npm run tauri build
-        env:
-          # For notarization (optional, requires Apple Developer account)
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Upload macOS artifacts
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.release_id }}
-          asset_path: src-tauri/target/release/bundle/macos/Murmur.app.tar.gz
-          asset_name: Murmur_${{ needs.create-release.outputs.version }}_macos.app.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload DMG
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.release_id }}
-          asset_path: src-tauri/target/release/bundle/dmg/Murmur_${{ needs.create-release.outputs.version }}_aarch64.dmg
-          asset_name: Murmur_${{ needs.create-release.outputs.version }}_macos.dmg
-          asset_content_type: application/octet-stream
-
-      - name: Generate update manifest
+      - name: List build outputs
         run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
-          SIGNATURE=$(cat src-tauri/target/release/bundle/macos/Murmur.app.tar.gz.sig 2>/dev/null || echo "")
+          echo "=== DMG files ==="
+          find src-tauri/target/release/bundle -name "*.dmg" 2>/dev/null || echo "No DMG found"
+          echo "=== App bundles ==="
+          find src-tauri/target/release/bundle -name "*.app" -type d 2>/dev/null || echo "No .app found"
+          echo "=== All bundle contents ==="
+          ls -la src-tauri/target/release/bundle/ 2>/dev/null || echo "No bundle dir"
+          ls -la src-tauri/target/release/bundle/macos/ 2>/dev/null || echo "No macos dir"
+          ls -la src-tauri/target/release/bundle/dmg/ 2>/dev/null || echo "No dmg dir"
 
+      - name: Prepare release artifacts
+        id: prepare
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+
+          # Find the DMG file (Tauri names it based on version and arch)
+          DMG_FILE=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -1)
+          if [ -n "$DMG_FILE" ]; then
+            cp "$DMG_FILE" "Murmur_${VERSION}_macos.dmg"
+            echo "dmg_path=Murmur_${VERSION}_macos.dmg" >> $GITHUB_OUTPUT
+          fi
+
+          # Create tar.gz of the .app bundle for auto-updater
+          APP_DIR=$(find src-tauri/target/release/bundle/macos -name "*.app" -type d | head -1)
+          if [ -n "$APP_DIR" ]; then
+            cd src-tauri/target/release/bundle/macos
+            tar -czf "../../../../../Murmur_${VERSION}_macos.app.tar.gz" "$(basename "$APP_DIR")"
+            cd -
+            echo "app_tar_path=Murmur_${VERSION}_macos.app.tar.gz" >> $GITHUB_OUTPUT
+          fi
+
+          # Check for signature file (if updater signing is configured)
+          if [ -f "src-tauri/target/release/bundle/macos/Murmur.app.tar.gz.sig" ]; then
+            SIGNATURE=$(cat src-tauri/target/release/bundle/macos/Murmur.app.tar.gz.sig)
+          else
+            SIGNATURE=""
+          fi
+
+          # Generate update manifest for auto-updater
           cat > latest.json << EOF
           {
             "version": "$VERSION",
@@ -132,27 +107,27 @@ jobs:
           }
           EOF
 
-      - name: Upload update manifest
-        uses: actions/upload-release-asset@v1
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.get-version.outputs.version }}
+          name: Murmur v${{ steps.get-version.outputs.version }}
+          draft: false
+          prerelease: false
+          body: |
+            ## Murmur v${{ steps.get-version.outputs.version }}
+
+            ### Installation
+            1. Download `Murmur_${{ steps.get-version.outputs.version }}_macos.dmg`
+            2. Open the DMG and drag Murmur to Applications
+            3. **First launch**: Right-click the app → Open (to bypass Gatekeeper for unsigned apps)
+            4. Grant microphone and accessibility permissions when prompted
+
+            ### What's New
+            See [commits since last release](https://github.com/anurag-duddu/murmur/commits/v${{ steps.get-version.outputs.version }})
+          files: |
+            Murmur_${{ steps.get-version.outputs.version }}_macos.dmg
+            Murmur_${{ steps.get-version.outputs.version }}_macos.app.tar.gz
+            latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.release_id }}
-          asset_path: latest.json
-          asset_name: latest.json
-          asset_content_type: application/json
-
-  publish-release:
-    needs: [create-release, build-macos]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Publish release
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: '${{ needs.create-release.outputs.release_id }}',
-              draft: false
-            });

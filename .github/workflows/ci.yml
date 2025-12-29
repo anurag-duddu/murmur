@@ -30,11 +30,9 @@ jobs:
       - name: Type check frontend
         run: npm run build
 
-      - name: Build app (debug)
-        run: npm run tauri build -- --debug
-        env:
-          # Skip signing for CI builds
-          TAURI_SIGNING_PRIVATE_KEY: ""
+      - name: Build Rust backend
+        run: cd src-tauri && cargo build --release
+        # Note: Full app bundle with signing happens in release workflow
 
   lint:
     runs-on: ubuntu-latest

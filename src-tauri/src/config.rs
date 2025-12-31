@@ -19,8 +19,13 @@ pub struct StoredPreferences {
 }
 
 impl StoredPreferences {
+    /// Get the app name for config directory.
+    fn app_name() -> String {
+        "murmur".to_string()
+    }
+
     fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("murmur").join("preferences.json"))
+        dirs::config_dir().map(|d| d.join(Self::app_name()).join("preferences.json"))
     }
 
     pub fn load() -> Self {
@@ -92,11 +97,7 @@ impl AppConfig {
                 .unwrap_or_else(|| {
                     env::var("DEFAULT_RECORDING_MODE").unwrap_or_else(|_| "push-to-talk".to_string())
                 }),
-            hotkey: stored
-                .hotkey
-                .unwrap_or_else(|| {
-                    env::var("DEFAULT_HOTKEY").unwrap_or_else(|_| "Option+Space".to_string())
-                }),
+            hotkey: stored.hotkey.unwrap_or_else(|| "Option+Space".to_string()),
             max_recording_duration: env::var("MAX_RECORDING_DURATION")
                 .unwrap_or_else(|_| "1800".to_string())
                 .parse()

@@ -944,6 +944,8 @@ pub struct WorkspaceIndexStatus {
 /// Insert text directly at cursor position
 /// Uses AppleScript keystroke for ASCII, clipboard paste for Unicode
 fn insert_text_directly(text: &str) {
+    println!("[INSERT] insert_text_directly called with {} chars", text.len());
+
     #[cfg(target_os = "macos")]
     {
         // Normalize newlines to spaces - pressing Enter in chat apps sends the message,
@@ -959,17 +961,19 @@ fn insert_text_directly(text: &str) {
             .collect::<Vec<&str>>()
             .join(" ");
 
+        println!("[INSERT] Clean text ({} chars): {:?}", clean_text.len(), &clean_text[..clean_text.len().min(50)]);
+
         // Check if text contains non-ASCII characters (Unicode)
         let has_unicode = clean_text.chars().any(|c| !c.is_ascii());
 
         if has_unicode {
             // For Unicode text (Hindi, Telugu, Tamil, etc.), use clipboard paste
             // AppleScript's keystroke command doesn't handle non-ASCII characters
-            println!("Inserting Unicode text via clipboard paste...");
+            println!("[INSERT] Using clipboard paste (Unicode detected)");
             insert_via_clipboard_preserving(&clean_text);
         } else {
             // For ASCII-only text, use keystroke (faster, no clipboard impact)
-            println!("Inserting ASCII text via keystroke...");
+            println!("[INSERT] Using keystroke (ASCII only)");
             insert_via_keystroke(&clean_text);
         }
     }
@@ -997,6 +1001,8 @@ fn escape_applescript_string(text: &str) -> String {
 #[cfg(target_os = "macos")]
 fn insert_via_keystroke(text: &str) {
     use std::process::Command;
+
+    println!("[KEYSTROKE] Starting keystroke insertion for {} chars", text.len());
 
     // Escape text for AppleScript string using robust escaping
     let escaped_text = escape_applescript_string(text);
@@ -1032,6 +1038,7 @@ end tell"#,
         )
     };
 
+    println!("[KEYSTROKE] Executing osascript...");
     let result = Command::new("osascript")
         .arg("-e")
         .arg(&script)
@@ -1040,8 +1047,13 @@ end tell"#,
     match result {
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            println!("[KEYSTROKE] osascript exit code: {:?}", output.status.code());
+            if !stdout.is_empty() {
+                println!("[KEYSTROKE] osascript stdout: {}", stdout);
+            }
             if output.status.success() && stderr.is_empty() {
-                println!("Text inserted via keystroke (clipboard untouched)");
+                println!("[KEYSTROKE] Text inserted via keystroke (clipboard untouched)");
             } else if stderr.contains("not allowed") || stderr.contains("assistive") || stderr.contains("1002") {
                 eprintln!("=======================================================");
                 eprintln!("ACCESSIBILITY PERMISSION REQUIRED");
@@ -1050,11 +1062,11 @@ end tell"#,
                 eprintln!("Then QUIT and RELAUNCH the app");
                 eprintln!("=======================================================");
             } else if !stderr.is_empty() {
-                eprintln!("osascript stderr: {}", stderr);
+                eprintln!("[KEYSTROKE] osascript stderr: {}", stderr);
             }
         }
         Err(e) => {
-            eprintln!("Failed to execute osascript: {}", e);
+            eprintln!("[KEYSTROKE] Failed to execute osascript: {}", e);
         }
     }
 }
@@ -1140,8 +1152,11 @@ fn hide_overlay(app: &AppHandle) {
 fn activate_app_by_bundle_id(bundle_id: &str) {
     use std::process::Command;
 
+    println!("[ACTIVATE] Attempting to activate app: {}", bundle_id);
+
     // Don't try to activate ourselves - that could cause issues
     if bundle_id == "com.idstuart.murmur" {
+        println!("[ACTIVATE] Skipping self-activation");
         return;
     }
 
@@ -1159,15 +1174,15 @@ fn activate_app_by_bundle_id(bundle_id: &str) {
 
     match result {
         Ok(output) => {
-            if !output.status.success() {
+            if output.status.success() {
+                println!("[ACTIVATE] Successfully activated app: {}", bundle_id);
+            } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                #[cfg(debug_assertions)]
-                eprintln!("Failed to activate app {}: {}", bundle_id, stderr);
+                eprintln!("[ACTIVATE] Failed to activate app {}: {}", bundle_id, stderr);
             }
         }
         Err(e) => {
-            #[cfg(debug_assertions)]
-            eprintln!("Failed to run osascript: {}", e);
+            eprintln!("[ACTIVATE] Failed to run osascript: {}", e);
         }
     }
 }
@@ -1534,6 +1549,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
 
 /// Internal function to stop recording from shortcut
 fn shortcut_stop_recording(app_handle: AppHandle) {
+    println!("[STOP] shortcut_stop_recording called");
     let app_handle_clone = app_handle.clone();
 
     // Spawn async task to handle the stop
@@ -1543,36 +1559,42 @@ fn shortcut_stop_recording(app_handle: AppHandle) {
         // Check if we can stop
         let current_state = state.get_state();
         if !current_state.can_stop_recording() {
-            #[cfg(debug_assertions)]
-            println!("Cannot stop recording from state: {:?}", current_state);
+            println!("[STOP] Cannot stop recording from state: {:?}", current_state);
             return;
         }
 
         // Capture the bundle_id BEFORE processing clears it
         let bundle_id = state.get_active_bundle_id();
+        println!("[STOP] Captured bundle_id: {:?}", bundle_id);
 
         // Use shared processing logic
         match process_recording_stop(&app_handle_clone, &state).await {
             Ok(final_text) => {
+                println!("[STOP] process_recording_stop succeeded, text: {} chars", final_text.len());
                 // Hide overlay, reactivate previous app, then insert text
                 let app_for_hide = app_handle_clone.clone();
                 std::thread::spawn(move || {
                     // Brief delay to show "Done!" state
                     std::thread::sleep(std::time::Duration::from_millis(DONE_DISPLAY_DELAY_MS));
+                    println!("[STOP] Hiding overlay");
                     hide_overlay(&app_for_hide);
                     // Reactivate the previous app explicitly
-                    if let Some(bid) = bundle_id {
-                        activate_app_by_bundle_id(&bid);
+                    if let Some(ref bid) = bundle_id {
+                        println!("[STOP] Reactivating app: {}", bid);
+                        activate_app_by_bundle_id(bid);
+                    } else {
+                        println!("[STOP] No bundle_id to reactivate");
                     }
                     // Wait for the app to regain focus
                     std::thread::sleep(std::time::Duration::from_millis(APP_FOCUS_WAIT_MS));
+                    println!("[STOP] Calling insert_text_directly");
                     // Insert text (this replaces selection in Command Mode, inserts at cursor in Dictation Mode)
                     insert_text_directly(&final_text);
+                    println!("[STOP] insert_text_directly completed");
                 });
             }
             Err(e) => {
-                #[cfg(debug_assertions)]
-                eprintln!("Recording stop failed: {}", e);
+                eprintln!("[STOP] Recording stop failed: {}", e);
                 // Error state and overlay hiding already handled in process_recording_stop
             }
         }
@@ -1602,24 +1624,33 @@ fn setup_global_shortcuts(
     hotkey: &str,
     _mode: &str, // Not used anymore - we read dynamically from config
 ) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=======================================================");
+    println!("[STARTUP] Setting up global shortcuts");
+    println!("[STARTUP] Requested hotkey: '{}'", hotkey);
+
     // Parse the hotkey string
     let shortcut = match parse_hotkey(hotkey) {
-        Some(s) => s,
+        Some(s) => {
+            println!("[STARTUP] Parsed hotkey successfully: {:?}", s);
+            s
+        }
         None => {
             // Default to Option+Space if parsing fails
-            println!("Failed to parse hotkey '{}', using default Option+Space", hotkey);
+            println!("[STARTUP] WARNING: Failed to parse hotkey '{}', using default Option+Space", hotkey);
             Shortcut::new(Some(Modifiers::ALT), tauri_plugin_global_shortcut::Code::Space)
         }
     };
 
-    println!("Registering global shortcut: {:?}", shortcut);
+    println!("[STARTUP] Registering global shortcut: {:?}", shortcut);
 
     // Register the shortcut with key state handling
     // IMPORTANT: Read recording_mode dynamically from config each time,
     // so changes in preferences take effect immediately
     app.handle().plugin(
         tauri_plugin_global_shortcut::Builder::new()
-            .with_handler(move |app, _shortcut, event| {
+            .with_handler(move |app, shortcut, event| {
+                println!("[HOTKEY] Shortcut event received: {:?} - {:?}", shortcut, event.state);
+
                 // Read current mode from config (not captured at startup)
                 let is_push_to_talk = {
                     let state: tauri::State<'_, AppState> = app.state();
@@ -1632,7 +1663,7 @@ fn setup_global_shortcuts(
 
                 match event.state {
                     ShortcutState::Pressed => {
-                        println!("Shortcut pressed, mode: {}", if is_push_to_talk { "push-to-talk" } else { "toggle" });
+                        println!("[HOTKEY] Shortcut PRESSED, mode: {}", if is_push_to_talk { "push-to-talk" } else { "toggle" });
                         if is_push_to_talk {
                             // Push-to-talk: start recording on press
                             shortcut_start_recording(app);
@@ -1642,9 +1673,9 @@ fn setup_global_shortcuts(
                         }
                     }
                     ShortcutState::Released => {
+                        println!("[HOTKEY] Shortcut RELEASED");
                         if is_push_to_talk {
                             // Push-to-talk: stop recording on release
-                            println!("Shortcut released (push-to-talk)");
                             shortcut_stop_recording(app.clone());
                         }
                         // Toggle mode: do nothing on release
@@ -1655,18 +1686,41 @@ fn setup_global_shortcuts(
     )?;
 
     // Register the specific shortcut
-    app.global_shortcut().register(shortcut)?;
-
-    println!("Global shortcut registered successfully");
+    match app.global_shortcut().register(shortcut) {
+        Ok(_) => {
+            println!("[STARTUP] ✓ Global shortcut registered successfully!");
+            println!("[STARTUP] Press '{}' to start/stop recording", hotkey);
+            println!("=======================================================");
+        }
+        Err(e) => {
+            eprintln!("[STARTUP] ✗ FAILED to register global shortcut!");
+            eprintln!("[STARTUP] Error: {}", e);
+            eprintln!("[STARTUP] This could be because:");
+            eprintln!("[STARTUP]   1. Another app is using this shortcut");
+            eprintln!("[STARTUP]   2. The shortcut is a system-reserved combination");
+            eprintln!("[STARTUP]   3. The app doesn't have proper permissions");
+            eprintln!("=======================================================");
+            return Err(e.into());
+        }
+    }
 
     Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    println!("=======================================================");
+    println!("[STARTUP] Murmur starting...");
+    println!("=======================================================");
+
     let config = AppConfig::load();
     let initial_hotkey = config.hotkey.clone();
     let initial_mode = config.recording_mode.clone();
+
+    println!("[STARTUP] Configuration loaded:");
+    println!("[STARTUP]   Hotkey: '{}'", initial_hotkey);
+    println!("[STARTUP]   Mode: '{}'", initial_mode);
+    println!("[STARTUP]   Has Groq API key: {}", config.groq_api_key.is_some());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())

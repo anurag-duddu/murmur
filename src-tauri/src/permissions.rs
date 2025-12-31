@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use std::process::Command;
 
+/// Get the app name for config directory.
+fn app_name() -> String {
+    "murmur".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionStatus {
     pub microphone: String, // "granted", "denied", "undetermined"
@@ -189,7 +194,7 @@ pub fn open_accessibility_settings() -> Result<(), String> {
 /// Check if onboarding has been completed
 pub fn is_onboarding_complete() -> bool {
     let config_dir = dirs::config_dir().unwrap_or_default();
-    let onboarding_file = config_dir.join("murmur").join("onboarding_complete");
+    let onboarding_file = config_dir.join(app_name()).join("onboarding_complete");
     onboarding_file.exists()
 }
 
@@ -197,7 +202,7 @@ pub fn is_onboarding_complete() -> bool {
 pub fn mark_onboarding_complete() -> Result<(), String> {
     let config_dir = dirs::config_dir()
         .ok_or("Could not find config directory")?
-        .join("murmur");
+        .join(app_name());
 
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Failed to create config directory: {}", e))?;
@@ -213,7 +218,7 @@ pub fn mark_onboarding_complete() -> Result<(), String> {
 pub fn set_selected_microphone(device_id: &str) -> Result<(), String> {
     let config_dir = dirs::config_dir()
         .ok_or("Could not find config directory")?
-        .join("murmur");
+        .join(app_name());
 
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Failed to create config directory: {}", e))?;
@@ -228,7 +233,7 @@ pub fn set_selected_microphone(device_id: &str) -> Result<(), String> {
 /// Get the selected microphone device name
 /// Returns None if no device is selected, "default" is selected, or device no longer exists
 pub fn get_selected_microphone_name() -> Option<String> {
-    let config_dir = dirs::config_dir()?.join("murmur");
+    let config_dir = dirs::config_dir()?.join(app_name());
     let mic_file = config_dir.join("selected_microphone");
 
     if !mic_file.exists() {

@@ -97,7 +97,7 @@ export function OnboardingWindow() {
     try {
       // Save selected microphone
       const prefs = await tauriCommands.getPreferences();
-      await tauriCommands.savePreferences({
+      await tauriCommands.updatePreferences({
         ...prefs,
         microphone: selectedMic,
         onboarding_complete: true,

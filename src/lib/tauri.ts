@@ -20,8 +20,6 @@ export const tauriCommands = {
   getPreferences: () => invoke<Preferences>("get_preferences"),
   updatePreferences: (preferences: Preferences) =>
     invoke<void>("update_preferences", { preferences }),
-  savePreferences: (preferences: Preferences) =>
-    invoke<void>("update_preferences", { preferences }),
 
   // Recording
   startRecording: () => invoke<void>("start_recording"),

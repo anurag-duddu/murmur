@@ -151,45 +151,6 @@ impl From<AppError> for String {
     }
 }
 
-/// Sanitize an error message by removing potentially sensitive information.
-/// Use this for error messages that will be shown to users or logged.
-#[allow(dead_code)]
-pub fn sanitize_error_message(msg: &str) -> String {
-    let mut sanitized = msg.to_string();
-
-    // Remove file paths (Unix-style)
-    let path_pattern = regex::Regex::new(r"/[\w./\-]+").ok();
-    if let Some(re) = path_pattern {
-        sanitized = re.replace_all(&sanitized, "[path]").to_string();
-    }
-
-    // Remove API keys (common patterns)
-    let key_patterns = [
-        r"sk-[a-zA-Z0-9]{20,}",           // OpenAI/Anthropic style
-        r"dg_[a-zA-Z0-9]{20,}",           // Deepgram
-        r"gsk_[a-zA-Z0-9]{20,}",          // Groq
-        r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", // UUIDs
-    ];
-
-    for pattern in &key_patterns {
-        if let Ok(re) = regex::Regex::new(pattern) {
-            sanitized = re.replace_all(&sanitized, "[redacted]").to_string();
-        }
-    }
-
-    // Remove IP addresses
-    if let Ok(re) = regex::Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b") {
-        sanitized = re.replace_all(&sanitized, "[ip]").to_string();
-    }
-
-    // Remove email addresses
-    if let Ok(re) = regex::Regex::new(r"\b[\w.-]+@[\w.-]+\.\w+\b") {
-        sanitized = re.replace_all(&sanitized, "[email]").to_string();
-    }
-
-    sanitized
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,44 +195,5 @@ mod tests {
         let json = serde_json::to_string(&error).unwrap();
         assert!(json.contains("transcription_failed"));
         assert!(json.contains("deepgram"));
-    }
-
-    #[test]
-    fn test_sanitize_error_message_paths() {
-        let msg = "Failed to read /Users/john/secret/config.json";
-        let sanitized = sanitize_error_message(msg);
-        assert!(!sanitized.contains("/Users"));
-        assert!(sanitized.contains("[path]"));
-    }
-
-    #[test]
-    fn test_sanitize_error_message_api_keys() {
-        let msg = "API key sk-abc123def456ghi789jkl012 is invalid";
-        let sanitized = sanitize_error_message(msg);
-        assert!(!sanitized.contains("sk-abc"));
-        assert!(sanitized.contains("[redacted]"));
-    }
-
-    #[test]
-    fn test_sanitize_error_message_ip() {
-        let msg = "Connection refused to 192.168.1.100:8080";
-        let sanitized = sanitize_error_message(msg);
-        assert!(!sanitized.contains("192.168"));
-        assert!(sanitized.contains("[ip]"));
-    }
-
-    #[test]
-    fn test_sanitize_error_message_email() {
-        let msg = "Failed to authenticate user@example.com";
-        let sanitized = sanitize_error_message(msg);
-        assert!(!sanitized.contains("user@example"));
-        assert!(sanitized.contains("[email]"));
-    }
-
-    #[test]
-    fn test_sanitize_error_message_preserves_normal_text() {
-        let msg = "Connection timeout after 30 seconds";
-        let sanitized = sanitize_error_message(msg);
-        assert_eq!(sanitized, msg);
     }
 }

@@ -182,14 +182,6 @@ impl RateLimiter {
     pub fn check_or_error(&self, service: Service) -> Result<(), String> {
         self.check(service).map_err(|e| e.to_string())
     }
-
-    /// Reset rate limit state for a service (for testing)
-    #[cfg(test)]
-    pub fn reset(&self, service: Service) {
-        if let Ok(mut states) = self.states.lock() {
-            states.remove(&service);
-        }
-    }
 }
 
 impl Default for RateLimiter {

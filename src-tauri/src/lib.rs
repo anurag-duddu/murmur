@@ -170,18 +170,6 @@ impl AppState {
             .map_err(|e| format!("Failed to lock config: {}", e))
     }
 
-    /// Execute a closure with mutable access to the config
-    #[allow(dead_code)]
-    fn with_config_mut<F, R>(&self, f: F) -> Result<R, String>
-    where
-        F: FnOnce(&mut AppConfig) -> R,
-    {
-        self.config
-            .lock()
-            .map(|mut c| f(&mut c))
-            .map_err(|e| format!("Failed to lock config: {}", e))
-    }
-
     /// Execute a closure with mutable access to the recorder
     fn with_recorder_mut<F, R>(&self, f: F) -> Result<R, String>
     where

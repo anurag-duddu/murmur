@@ -29,11 +29,6 @@ impl AudioRecorder {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn start_recording(&mut self, app_handle: AppHandle) -> Result<(), String> {
-        self.start_recording_with_device(app_handle, None)
-    }
-
     pub fn start_recording_with_device(
         &mut self,
         app_handle: AppHandle,

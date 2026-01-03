@@ -33,15 +33,23 @@ impl WorkOsClient {
     /// Generate the authorization URL for WorkOS AuthKit.
     ///
     /// This URL should be opened in the user's browser to initiate the OAuth flow.
-    pub fn get_authorization_url(&self, pkce: &PkceChallenge) -> String {
-        format!(
+    /// If `login_hint` is provided, WorkOS will pre-fill the email field.
+    pub fn get_authorization_url(&self, pkce: &PkceChallenge, login_hint: Option<&str>) -> String {
+        let mut url = format!(
             "{}/user_management/authorize?client_id={}&redirect_uri={}&response_type=code&code_challenge={}&code_challenge_method=S256&state={}&provider=authkit",
             WORKOS_API_BASE,
             urlencoding::encode(&self.client_id),
             urlencoding::encode(&self.redirect_uri),
             urlencoding::encode(&pkce.challenge),
             urlencoding::encode(&pkce.state)
-        )
+        );
+
+        // Add login_hint if we have a remembered email
+        if let Some(email) = login_hint {
+            url.push_str(&format!("&login_hint={}", urlencoding::encode(email)));
+        }
+
+        url
     }
 
     /// Exchange an authorization code for access and refresh tokens.

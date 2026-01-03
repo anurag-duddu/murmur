@@ -27,11 +27,13 @@ export function OnboardingWindow() {
   // Track if we've started checking permissions
   const hasStartedRef = useRef(false);
 
-  // Check permissions ONLY when we receive the explicit "start-onboarding" event from backend
-  // This prevents permission dialogs from appearing before the user has logged in
+  // Check permissions when we receive the "start-onboarding" event from backend
+  // OR as a fallback, check on mount after a delay (handles race condition where
+  // the event might be emitted before the listener is set up)
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
     let unlistenEvent: (() => void) | null = null;
+    let mountTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const checkPermissions = async () => {
       try {
@@ -55,7 +57,7 @@ export function OnboardingWindow() {
       if (hasStartedRef.current) return;
       hasStartedRef.current = true;
 
-      console.log("[Onboarding] Starting permission checks (triggered by backend event)");
+      console.log("[Onboarding] Starting permission checks");
 
       // Initial check
       checkPermissions();
@@ -80,16 +82,22 @@ export function OnboardingWindow() {
       }
     };
 
-    // ONLY listen for explicit "start-onboarding" event from backend
-    // This ensures permission checks only happen AFTER:
-    // 1. User has logged in
-    // 2. Backend has determined onboarding is needed
-    // 3. Backend has shown the onboarding window
     const setup = async () => {
+      // Listen for explicit "start-onboarding" event from backend (OAuth callback flow)
       unlistenEvent = await listen("start-onboarding", () => {
         console.log("[Onboarding] Received start-onboarding event from backend");
         startPolling();
       });
+
+      // FALLBACK: Also start polling after a short delay on mount
+      // This handles the race condition where the backend emits the event
+      // before the React listener is set up (e.g., on direct app startup)
+      mountTimeout = setTimeout(() => {
+        if (!hasStartedRef.current) {
+          console.log("[Onboarding] Starting permission checks (mount fallback)");
+          startPolling();
+        }
+      }, 300); // 300ms fallback - enough time for the event to arrive if it was sent
     };
 
     setup();
@@ -97,6 +105,7 @@ export function OnboardingWindow() {
     return () => {
       stopPolling();
       if (unlistenEvent) unlistenEvent();
+      if (mountTimeout) clearTimeout(mountTimeout);
     };
   }, []);
 

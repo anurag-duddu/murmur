@@ -4,6 +4,7 @@ import { GeneralTab } from "./GeneralTab";
 import { AudioTab } from "./AudioTab";
 import { StickyActionBar } from "./StickyActionBar";
 import { usePreferences, useEntranceAnimation } from "@/hooks";
+import { tauriEvents, tauriWindow } from "@/lib/tauri";
 import { Settings, Volume2, Sparkles } from "lucide-react";
 import gsap from "gsap";
 
@@ -64,6 +65,29 @@ export function PreferencesWindow() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [hasChanges, handleSave, resetPreferences]);
+
+  // Listen for auth state changes - hide window on logout
+  useEffect(() => {
+    let mounted = true;
+
+    const setupListener = async () => {
+      const unlisten = await tauriEvents.onAuthStateChanged((state) => {
+        if (mounted && !state.is_authenticated) {
+          // User logged out - hide this window
+          tauriWindow.hide();
+        }
+      });
+
+      return unlisten;
+    };
+
+    const unlistenPromise = setupListener();
+
+    return () => {
+      mounted = false;
+      unlistenPromise.then((fn) => fn());
+    };
+  }, []);
 
   if (isLoading) {
     return (

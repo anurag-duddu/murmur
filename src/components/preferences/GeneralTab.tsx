@@ -25,41 +25,84 @@ interface GeneralTabProps {
 export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
   const [showLanguageEditor, setShowLanguageEditor] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
-  // Fetch user info on mount
-  useEffect(() => {
-    console.log("[GeneralTab] Fetching user info...");
-    tauriCommands.getUserInfo().then((userInfo) => {
-      console.log("[GeneralTab] Received user info:", userInfo);
+  // Fetch user info
+  const fetchUser = useCallback(async () => {
+    setIsLoadingUser(true);
+    try {
+      const userInfo = await tauriCommands.getUserInfo();
       setUser(userInfo);
-    }).catch((err) => {
+    } catch (err) {
       console.error("[GeneralTab] Failed to get user info:", err);
-    });
+    } finally {
+      setIsLoadingUser(false);
+    }
   }, []);
+
+  // Fetch on mount
+  useEffect(() => {
+    fetchUser();
+  }, [fetchUser]);
+
+  // Re-fetch when window becomes visible (handles sign-in flow)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        fetchUser();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [fetchUser]);
 
   const handleSignOut = useCallback(async () => {
     setIsSigningOut(true);
+
+    // Safety timeout - reset after 10 seconds max in case of hang
+    const timeout = setTimeout(() => {
+      console.warn("[GeneralTab] Sign out timeout - resetting state");
+      setIsSigningOut(false);
+    }, 10000);
+
     try {
       await tauriCommands.logout();
       // The backend will handle showing the login window
+      // Reset state for safety (window may hide before this runs)
+      setIsSigningOut(false);
     } catch (err) {
       console.error("Failed to sign out:", err);
       setIsSigningOut(false);
+    } finally {
+      clearTimeout(timeout);
     }
   }, []);
 
   return (
     <div className="space-y-8">
-      {/* Account Section */}
-      {user && (
-        <section className="space-y-5">
-          <div className="flex items-center gap-2">
-            <User className="h-4 w-4 text-accent" />
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-white/50">Account</h2>
-          </div>
+      {/* Account Section - Always show, with loading state */}
+      <section className="space-y-5">
+        <div className="flex items-center gap-2">
+          <User className="h-4 w-4 text-accent" />
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-white/50">Account</h2>
+        </div>
 
-          <div className="rounded-2xl glass-card p-4 sm:p-5">
+        <div className="rounded-2xl glass-card p-4 sm:p-5">
+          {isLoadingUser ? (
+            // Loading skeleton
+            <div className="flex items-center justify-between animate-pulse">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-white/10" />
+                <div className="space-y-2">
+                  <div className="h-4 w-32 rounded bg-white/10" />
+                  <div className="h-3 w-40 rounded bg-white/10" />
+                </div>
+              </div>
+              <div className="h-8 w-24 rounded bg-white/10" />
+            </div>
+          ) : user ? (
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {user.profile_picture_url ? (
@@ -95,9 +138,23 @@ export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
                 {isSigningOut ? "Signing out..." : "Sign Out"}
               </Button>
             </div>
-          </div>
-        </section>
-      )}
+          ) : (
+            // No user found - try to sign in again
+            <div className="flex flex-col items-center gap-3 py-2">
+              <p className="text-sm text-white/50">Session expired or not signed in</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSignOut}
+                disabled={isSigningOut}
+                className="gap-2 glass-input"
+              >
+                {isSigningOut ? "Redirecting..." : "Sign In Again"}
+              </Button>
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* Recording Controls Section */}
       <section className="space-y-5">

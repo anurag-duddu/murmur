@@ -35,6 +35,7 @@ export const tauriCommands = {
   requestMicrophonePermission: () => invoke<boolean>("request_microphone_permission"),
   requestAccessibilityPermission: () => invoke<boolean>("request_accessibility_permission"),
   openAccessibilitySettings: () => invoke<void>("open_accessibility_settings"),
+  openMicrophoneSettings: () => invoke<void>("open_microphone_settings"),
   getMicrophones: () => invoke<MicrophoneDevice[]>("get_microphones"),
   setSelectedMicrophone: (deviceId: string) =>
     invoke<void>("set_selected_microphone", { device_id: deviceId }),
@@ -54,6 +55,8 @@ export const tauriCommands = {
   logout: () => invoke<void>("logout"),
   getUserInfo: () => invoke<UserInfo | null>("get_user_info"),
   isAuthenticated: () => invoke<boolean>("is_authenticated"),
+  getRememberedEmail: () => invoke<string | null>("get_remembered_email"),
+  clearRememberedEmail: () => invoke<void>("clear_remembered_email"),
 };
 
 // ============================================================================

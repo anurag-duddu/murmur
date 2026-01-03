@@ -113,7 +113,7 @@ pub enum AuthError {
     InvalidCallback,
     StateMismatch,
     NetworkError(String),
-    KeychainError(String),
+    StorageError(String),
     WorkOsError(String),
 }
 
@@ -125,7 +125,7 @@ impl std::fmt::Display for AuthError {
             AuthError::InvalidCallback => write!(f, "Invalid authentication callback"),
             AuthError::StateMismatch => write!(f, "Authentication state mismatch"),
             AuthError::NetworkError(e) => write!(f, "Network error: {}", e),
-            AuthError::KeychainError(e) => write!(f, "Keychain error: {}", e),
+            AuthError::StorageError(e) => write!(f, "Storage error: {}", e),
             AuthError::WorkOsError(e) => write!(f, "Authentication error: {}", e),
         }
     }

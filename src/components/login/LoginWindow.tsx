@@ -11,7 +11,46 @@ export function LoginWindow() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showTrouble, setShowTrouble] = useState(false);
+  const [rememberedEmail, setRememberedEmail] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load remembered email on mount
+  useEffect(() => {
+    const loadRememberedEmail = async () => {
+      try {
+        const email = await tauriCommands.getRememberedEmail();
+        setRememberedEmail(email);
+      } catch (err) {
+        // Ignore - no remembered email
+      }
+    };
+    loadRememberedEmail();
+  }, []);
+
+  // Reset state when window becomes visible (e.g., after sign-out)
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === "visible") {
+        setIsLoading(false);
+        setError(null);
+        setShowTrouble(false);
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+        }
+        // Reload remembered email (it may have changed after sign-out)
+        try {
+          const email = await tauriCommands.getRememberedEmail();
+          setRememberedEmail(email);
+        } catch {
+          // Ignore
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
 
   // Listen for auth state changes (callback from OAuth flow)
   useEffect(() => {
@@ -21,7 +60,6 @@ export function LoginWindow() {
         setIsLoading(false);
         setError(null);
         setShowTrouble(false);
-        // Clear timeout
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
           timeoutRef.current = null;
@@ -31,7 +69,6 @@ export function LoginWindow() {
 
     return () => {
       unlisten.then((fn) => fn());
-      // Cleanup timeout on unmount
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
@@ -75,6 +112,15 @@ export function LoginWindow() {
     setError(null);
   }, []);
 
+  const handleUseDifferentAccount = useCallback(async () => {
+    try {
+      await tauriCommands.clearRememberedEmail();
+      setRememberedEmail(null);
+    } catch (err) {
+      console.error("Failed to clear remembered email:", err);
+    }
+  }, []);
+
   return (
     <div className="flex min-h-screen flex-col items-center justify-center glass-window p-10 relative overflow-hidden">
       {/* Ambient background glow */}
@@ -99,9 +145,13 @@ export function LoginWindow() {
           transition={{ delay: 0.1 }}
           className="rounded-xl bg-white/5 border border-white/10 p-6 backdrop-blur-sm"
         >
-          <h2 className="text-lg font-medium text-white mb-2">Welcome</h2>
+          <h2 className="text-lg font-medium text-white mb-2">
+            {rememberedEmail ? "Welcome back" : "Welcome"}
+          </h2>
           <p className="text-sm text-white/60 mb-6">
-            Sign in to start using Keyhold
+            {rememberedEmail
+              ? `Sign in as ${rememberedEmail}`
+              : "Sign in to start using Keyhold"}
           </p>
 
           {error && (
@@ -144,10 +194,21 @@ export function LoginWindow() {
                 </svg>
                 Opening browser...
               </span>
+            ) : rememberedEmail ? (
+              "Continue"
             ) : (
               "Sign in"
             )}
           </Button>
+
+          {rememberedEmail && !isLoading && (
+            <button
+              onClick={handleUseDifferentAccount}
+              className="mt-3 text-xs text-white/50 hover:text-white/70 underline underline-offset-2"
+            >
+              Use a different account
+            </button>
+          )}
 
           {isLoading && !showTrouble && (
             <motion.div

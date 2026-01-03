@@ -685,6 +685,12 @@ async fn toggle_recording(app_handle: AppHandle, state: State<'_, AppState>) -> 
 
 #[tauri::command]
 async fn show_preferences(app_handle: AppHandle) -> Result<(), String> {
+    // Don't show preferences if not authenticated
+    if !auth::is_authenticated() {
+        log::warn!("[PREFERENCES] Cannot show preferences - user not authenticated");
+        return Err("Not authenticated".to_string());
+    }
+
     if let Some(window) = app_handle.get_webview_window("main") {
         window
             .show()
@@ -756,6 +762,11 @@ fn request_microphone_permission() -> bool {
 #[tauri::command]
 fn open_accessibility_settings() -> Result<(), String> {
     permissions::open_accessibility_settings()
+}
+
+#[tauri::command]
+fn open_microphone_settings() -> Result<(), String> {
+    permissions::open_microphone_settings()
 }
 
 #[tauri::command]
@@ -1038,6 +1049,18 @@ fn get_user_info() -> Result<Option<auth::UserInfo>, String> {
 #[tauri::command]
 fn is_authenticated() -> bool {
     auth::is_authenticated()
+}
+
+/// Get remembered email for "Sign in as" feature
+#[tauri::command]
+fn get_remembered_email() -> Option<String> {
+    auth::storage::get_remembered_email().ok().flatten()
+}
+
+/// Clear remembered email (to sign in as different user)
+#[tauri::command]
+fn clear_remembered_email() -> Result<(), String> {
+    auth::storage::clear_remembered_email().map_err(|e| e.to_string())
 }
 
 /// Workspace index status response
@@ -1378,7 +1401,7 @@ fn activate_app_by_bundle_id(bundle_id: &str) {
     log::info!("[ACTIVATE] Attempting to activate app: {}", bundle_id);
 
     // Don't try to activate ourselves - that could cause issues
-    if bundle_id == "com.idstuart.murmur" {
+    if bundle_id == "com.keyhold.app" {
         log::info!("[ACTIVATE] Skipping self-activation");
         return;
     }
@@ -1631,6 +1654,16 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
     // Check if text insertion is in progress - don't start recording if so
     if state.is_inserting() {
         log::info!("[HOTKEY] Cannot start recording: text insertion in progress");
+        return;
+    }
+
+    // Fast in-memory auth check (no disk I/O - just atomic bool read)
+    if !auth::is_authenticated_fast() {
+        log::info!("[HOTKEY] Cannot start recording: user not authenticated");
+        if let Some(login) = app_handle.get_webview_window("login") {
+            let _ = login.show();
+            let _ = login.set_focus();
+        }
         return;
     }
 
@@ -2054,9 +2087,30 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // Another instance tried to launch - bring existing app to focus
-            log::info!("Another instance attempted to start, bringing existing window to focus");
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Another instance tried to launch - check if it's a deep link callback
+            log::info!("Another instance attempted to start, args: {:?}", args);
+
+            // Check if any argument is a deep link URL (OAuth callback)
+            for arg in &args {
+                if arg.starts_with("keyhold://auth/callback") {
+                    log::info!("[AUTH] Deep link callback from second instance: {}", arg);
+                    let app_clone = app.clone();
+                    let url = arg.clone();
+                    tauri::async_runtime::spawn(async move {
+                        match auth::handle_callback(&app_clone, &url).await {
+                            Ok(()) => log::info!("[AUTH] OAuth callback handled successfully"),
+                            Err(e) => {
+                                log::error!("[AUTH] OAuth callback failed: {}", e);
+                                sentry_capture_error(&format!("OAuth callback failed: {}", e), None);
+                            }
+                        }
+                    });
+                    return; // Don't show window, auth flow will handle it
+                }
+            }
+
+            // Regular second instance - just focus window
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -2081,6 +2135,7 @@ pub fn run() {
             get_microphones,
             request_microphone_permission,
             open_accessibility_settings,
+            open_microphone_settings,
             request_accessibility_permission,
             set_selected_microphone,
             is_onboarding_complete,
@@ -2097,8 +2152,13 @@ pub fn run() {
             logout,
             get_user_info,
             is_authenticated,
+            get_remembered_email,
+            clear_remembered_email,
         ])
         .setup(move |app| {
+            // Initialize auth cache from disk (once, at startup)
+            auth::init_auth_cache();
+
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -2205,6 +2265,22 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                let label = window.label();
+
+                // SECURITY: If login window is closed and user is not authenticated, quit the app
+                if label == "login" && !auth::is_authenticated() {
+                    log::info!("[WINDOW] Login window closed without authentication - quitting app");
+                    let app_handle = window.app_handle().clone();
+                    // Allow the close and exit the app
+                    // Don't prevent close - let the window close normally
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        app_handle.exit(0);
+                    });
+                    return;
+                }
+
+                // For other windows (or login when authenticated), just hide them
                 let _ = window.hide();
                 api.prevent_close();
             }

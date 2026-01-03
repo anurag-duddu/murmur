@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Mic, Accessibility, Check, Loader2, RefreshCw } from "lucide-react";
+import { Mic, Accessibility, Check, Loader2, RefreshCw, ExternalLink } from "lucide-react";
+import { tauriCommands } from "@/lib/tauri";
 
 type PermissionType = "microphone" | "accessibility";
 type PermissionStatus = "granted" | "denied" | "pending" | "checking";
@@ -51,9 +52,21 @@ export function PermissionCard({
   const statusConfig = STATUS_CONFIG[status];
   const Icon = config.icon;
   const isGranted = status === "granted";
+  const isDenied = status === "denied";
 
   // For accessibility, show "waiting" state after user clicks "Open System Settings"
   const showWaitingState = type === "accessibility" && isAwaitingGrant && !isGranted;
+
+  // For microphone, show "denied" recovery state with link to System Settings
+  const showMicDeniedState = type === "microphone" && isDenied;
+
+  const handleOpenMicrophoneSettings = async () => {
+    try {
+      await tauriCommands.openMicrophoneSettings();
+    } catch (err) {
+      console.error("Failed to open microphone settings:", err);
+    }
+  };
 
   return (
     <div className="rounded-2xl glass-card p-6">
@@ -119,8 +132,26 @@ export function PermissionCard({
         </div>
       )}
 
-      {/* Normal action button (before waiting state) */}
-      {!isGranted && !showWaitingState && (
+      {/* Denied state for microphone - shows button to open System Settings */}
+      {showMicDeniedState && (
+        <div className="mt-4 space-y-3">
+          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
+            <p className="text-sm text-destructive">
+              Microphone access was denied. Please enable it in System Settings to continue.
+            </p>
+          </div>
+          <Button
+            onClick={handleOpenMicrophoneSettings}
+            className="w-full gap-2 bg-white/[0.08] text-white hover:bg-white/[0.12] border border-white/[0.15]"
+          >
+            <ExternalLink className="h-4 w-4" />
+            Open Microphone Settings
+          </Button>
+        </div>
+      )}
+
+      {/* Normal action button (before waiting state or denied state) */}
+      {!isGranted && !showWaitingState && !showMicDeniedState && (
         <div className="mt-4">
           <Button
             onClick={onRequest}

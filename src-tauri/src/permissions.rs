@@ -271,6 +271,24 @@ pub fn open_accessibility_settings() -> Result<(), String> {
     }
 }
 
+/// Open System Settings to the Microphone pane
+/// Used when user has denied microphone permission and needs to re-grant it
+pub fn open_microphone_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            .spawn()
+            .map_err(|e| format!("Failed to open System Settings: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
 /// Check if onboarding has been completed
 pub fn is_onboarding_complete() -> bool {
     let config_dir = dirs::config_dir().unwrap_or_default();

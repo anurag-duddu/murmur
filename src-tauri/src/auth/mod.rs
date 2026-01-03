@@ -1,13 +1,14 @@
 //! Authentication module for Keyhold.
 //!
 //! Provides WorkOS OAuth authentication with PKCE security and secure token
-//! storage using macOS Keychain.
+//! storage using file-based storage.
 
-pub mod keychain;
 pub mod pkce;
+pub mod storage;
 pub mod types;
 pub mod workos;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -21,13 +22,34 @@ use self::workos::WorkOsClient;
 /// This is consumed when the callback is received.
 static PKCE_STATE: Mutex<Option<types::PkceChallenge>> = Mutex::new(None);
 
+/// In-memory auth state for fast hotkey checks (no disk I/O).
+/// Set on login, cleared on logout, initialized from disk at startup.
+static AUTH_CACHE: AtomicBool = AtomicBool::new(false);
+
+/// Initialize the in-memory auth cache from disk.
+/// Called once at app startup.
+pub fn init_auth_cache() {
+    let is_auth = match storage::get_tokens() {
+        Ok(Some(tokens)) => !tokens.refresh_token.is_empty(),
+        _ => false,
+    };
+    AUTH_CACHE.store(is_auth, Ordering::SeqCst);
+    log::info!("[AUTH] Initialized auth cache: {}", is_auth);
+}
+
+/// Fast in-memory check for authentication (no disk I/O).
+/// Use this on hot paths like hotkey handlers.
+pub fn is_authenticated_fast() -> bool {
+    AUTH_CACHE.load(Ordering::SeqCst)
+}
+
 /// Check if the user is currently authenticated.
 ///
 /// Returns `true` if a refresh token exists (access token can be refreshed).
 /// We check for refresh_token presence rather than access_token expiry because
 /// access tokens are short-lived (5 min) but refresh tokens last much longer.
 pub fn is_authenticated() -> bool {
-    match keychain::get_tokens() {
+    match storage::get_tokens() {
         Ok(Some(tokens)) => !tokens.refresh_token.is_empty(),
         _ => false,
     }
@@ -35,8 +57,8 @@ pub fn is_authenticated() -> bool {
 
 /// Get the current authentication state for the frontend.
 pub fn get_auth_state() -> AuthState {
-    let tokens = keychain::get_tokens().ok().flatten();
-    let user = keychain::get_user_info().ok().flatten();
+    let tokens = storage::get_tokens().ok().flatten();
+    let user = storage::get_user_info().ok().flatten();
 
     // Check for refresh token presence rather than access token expiry
     let is_authenticated = tokens.map(|t| !t.refresh_token.is_empty()).unwrap_or(false);
@@ -51,6 +73,7 @@ pub fn get_auth_state() -> AuthState {
 /// Start the OAuth authentication flow.
 ///
 /// Generates PKCE challenge, stores it, and opens the browser to WorkOS.
+/// Uses remembered email (if any) as login_hint for faster re-login.
 pub fn start_auth_flow(app: &AppHandle) -> Result<(), AuthError> {
     log::info!("Starting OAuth authentication flow");
 
@@ -63,12 +86,18 @@ pub fn start_auth_flow(app: &AppHandle) -> Result<(), AuthError> {
         *state = Some(pkce.clone());
     }
 
+    // Get remembered email for login hint
+    let remembered_email = storage::get_remembered_email().ok().flatten();
+    if let Some(ref email) = remembered_email {
+        log::info!("Using remembered email as login hint: {}", email);
+    }
+
     // Create WorkOS client and get authorization URL
     let client = WorkOsClient::new().map_err(|e| {
         log::error!("Failed to create WorkOS client: {}", e);
         e
     })?;
-    let auth_url = client.get_authorization_url(&pkce);
+    let auth_url = client.get_authorization_url(&pkce, remembered_email.as_deref());
 
     log::info!("Opening authorization URL in browser: {}", auth_url);
 
@@ -124,8 +153,11 @@ pub async fn handle_callback(app: &AppHandle, url: &str) -> Result<(), AuthError
     let (tokens, user_info) = client.exchange_code(&callback.code, &pkce.verifier).await?;
 
     // Store tokens and user info in keychain
-    keychain::store_tokens(&tokens)?;
-    keychain::store_user_info(&user_info)?;
+    storage::store_tokens(&tokens)?;
+    storage::store_user_info(&user_info)?;
+
+    // Update in-memory auth cache
+    AUTH_CACHE.store(true, Ordering::SeqCst);
 
     log::info!("Authentication successful for user: {}", user_info.email);
 
@@ -143,12 +175,14 @@ pub async fn handle_callback(app: &AppHandle, url: &str) -> Result<(), AuthError
         let _ = login_window.close();
     }
 
-    // Check if onboarding is needed
+    // Check if onboarding has EVER been completed
+    // NOTE: We intentionally do NOT check accessibility permission here.
+    // Accessibility is tied to code signature, not auth state.
+    // If accessibility was lost (e.g., app update), it's handled at app startup, not auth.
     let needs_onboarding = !crate::permissions::is_onboarding_complete();
-    let has_accessibility = crate::permissions::check_accessibility_permission();
 
-    if needs_onboarding || !has_accessibility {
-        // Show onboarding window
+    if needs_onboarding {
+        // First-time user: show onboarding
         if let Some(onboarding) = app.get_webview_window("onboarding") {
             let _ = onboarding.show();
             let _ = onboarding.set_focus();
@@ -160,9 +194,17 @@ pub async fn handle_callback(app: &AppHandle, url: &str) -> Result<(), AuthError
             });
         }
     } else {
-        // Just set the app to accessory mode (menu bar only)
-        #[cfg(target_os = "macos")]
-        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+        // Returning user: show preferences briefly so they know auth worked
+        log::info!("[AUTH] Returning user, showing preferences window");
+
+        // Show the main (preferences) window for feedback
+        if let Some(main_window) = app.get_webview_window("main") {
+            let _ = main_window.show();
+            let _ = main_window.set_focus();
+        }
+
+        // Emit event so frontend knows auth completed
+        let _ = app.emit("auth-complete", ());
     }
 
     Ok(())
@@ -170,14 +212,14 @@ pub async fn handle_callback(app: &AppHandle, url: &str) -> Result<(), AuthError
 
 /// Refresh the access token if it's expired or about to expire.
 pub async fn refresh_if_needed() -> Result<(), AuthError> {
-    let tokens = keychain::get_tokens()?.ok_or(AuthError::NotAuthenticated)?;
+    let tokens = storage::get_tokens()?.ok_or(AuthError::NotAuthenticated)?;
 
     if tokens.is_expired() {
         log::info!("Access token expired, refreshing...");
 
         let client = WorkOsClient::new()?;
         let new_tokens = client.refresh_token(&tokens.refresh_token).await?;
-        keychain::store_tokens(&new_tokens)?;
+        storage::store_tokens(&new_tokens)?;
 
         log::info!("Access token refreshed successfully");
     }
@@ -189,7 +231,7 @@ pub async fn refresh_if_needed() -> Result<(), AuthError> {
 pub async fn get_access_token() -> Result<String, AuthError> {
     refresh_if_needed().await?;
 
-    let tokens = keychain::get_tokens()?.ok_or(AuthError::NotAuthenticated)?;
+    let tokens = storage::get_tokens()?.ok_or(AuthError::NotAuthenticated)?;
     Ok(tokens.access_token)
 }
 
@@ -199,8 +241,11 @@ pub async fn get_access_token() -> Result<String, AuthError> {
 pub fn logout(app: &AppHandle) -> Result<(), AuthError> {
     log::info!("Logging out user");
 
+    // Clear in-memory auth cache first (blocks hotkey immediately)
+    AUTH_CACHE.store(false, Ordering::SeqCst);
+
     // Clear all auth data
-    keychain::clear_all()?;
+    storage::clear_all()?;
 
     // Emit auth state change
     let auth_state = AuthState {
@@ -231,5 +276,5 @@ pub fn logout(app: &AppHandle) -> Result<(), AuthError> {
 
 /// Get the current user's information.
 pub fn get_user_info() -> Result<Option<UserInfo>, AuthError> {
-    keychain::get_user_info()
+    storage::get_user_info()
 }

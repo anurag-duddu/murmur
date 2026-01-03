@@ -29,7 +29,7 @@ impl Default for RateLimitConfig {
 
 /// Pre-defined rate limits for different services
 impl RateLimitConfig {
-    /// Transcription services (Deepgram, Whisper API)
+    /// Transcription services (Groq Whisper API)
     /// More permissive since users might take rapid notes
     pub fn transcription() -> Self {
         Self {

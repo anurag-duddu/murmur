@@ -24,9 +24,9 @@ pub enum RecordingState {
     Idle,
     /// Actively capturing audio from microphone
     Recording,
-    /// Audio captured, sending to Deepgram for transcription
+    /// Audio captured, sending to Groq Whisper for transcription
     Transcribing,
-    /// Transcript received, sending to Claude for enhancement (Dictation Mode)
+    /// Transcript received, sending to Groq LLM for enhancement (Dictation Mode)
     Enhancing,
     /// Command Mode: transforming selected text with voice command
     Transforming,

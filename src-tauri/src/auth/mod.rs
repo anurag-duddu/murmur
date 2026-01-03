@@ -88,8 +88,8 @@ pub fn start_auth_flow(app: &AppHandle) -> Result<(), AuthError> {
 
     // Get remembered email for login hint
     let remembered_email = storage::get_remembered_email().ok().flatten();
-    if let Some(ref email) = remembered_email {
-        log::info!("Using remembered email as login hint: {}", email);
+    if remembered_email.is_some() {
+        log::info!("Using remembered email as login hint");
     }
 
     // Create WorkOS client and get authorization URL

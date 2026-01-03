@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Mic, Accessibility, Check, Loader2, RefreshCw, ExternalLink } from "lucide-react";
+import { Mic, Accessibility, Check, Loader2, RefreshCw, ExternalLink, AlertCircle } from "lucide-react";
 import { tauriCommands } from "@/lib/tauri";
 
 type PermissionType = "microphone" | "accessibility";
@@ -48,6 +49,8 @@ export function PermissionCard({
   isAwaitingGrant = false,
   onCheckNow,
 }: PermissionCardProps) {
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
   const config = PERMISSION_CONFIG[type];
   const statusConfig = STATUS_CONFIG[status];
   const Icon = config.icon;
@@ -61,10 +64,12 @@ export function PermissionCard({
   const showMicDeniedState = type === "microphone" && isDenied;
 
   const handleOpenMicrophoneSettings = async () => {
+    setSettingsError(null);
     try {
       await tauriCommands.openMicrophoneSettings();
     } catch (err) {
       console.error("Failed to open microphone settings:", err);
+      setSettingsError("Unable to open microphone settings. Please open System Settings manually.");
     }
   };
 
@@ -147,6 +152,12 @@ export function PermissionCard({
             <ExternalLink className="h-4 w-4" />
             Open Microphone Settings
           </Button>
+          {settingsError && (
+            <div className="flex items-start gap-2 rounded-lg bg-warning/10 border border-warning/20 p-3">
+              <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+              <p className="text-sm text-warning">{settingsError}</p>
+            </div>
+          )}
         </div>
       )}
 

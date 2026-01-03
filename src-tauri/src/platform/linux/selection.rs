@@ -36,7 +36,9 @@ pub fn has_selection() -> bool {
 
 /// Stub: Always returns NoSelection error on Linux
 pub fn get_selected_text() -> Result<String, SelectionError> {
-    Err(SelectionError::Failed("Selection not supported on Linux".to_string()))
+    Err(SelectionError::Failed(
+        "Selection not supported on Linux".to_string(),
+    ))
 }
 
 /// Stub: Always returns None on Linux
@@ -54,7 +56,10 @@ mod tests {
         assert_eq!(format!("{}", no_sel), "No text selected");
 
         let access_denied = SelectionError::AccessibilityDenied;
-        assert_eq!(format!("{}", access_denied), "Accessibility permission denied");
+        assert_eq!(
+            format!("{}", access_denied),
+            "Accessibility permission denied"
+        );
 
         let failed = SelectionError::Failed("test error".to_string());
         assert_eq!(format!("{}", failed), "Selection error: test error");

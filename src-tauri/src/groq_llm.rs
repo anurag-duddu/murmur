@@ -52,14 +52,14 @@ fn strip_wrapping(s: &str) -> String {
 
     // Strip triple quotes (Python-style)
     if result.starts_with("\"\"\"") && result.ends_with("\"\"\"") {
-        result = result[3..result.len()-3].trim();
+        result = result[3..result.len() - 3].trim();
     }
 
     // Strip code fences with optional language
     if result.starts_with("```") {
         // Find end of first line (language specifier)
         if let Some(end_first_line) = result.find('\n') {
-            let after_fence = &result[end_first_line+1..];
+            let after_fence = &result[end_first_line + 1..];
             if let Some(closing_idx) = after_fence.rfind("```") {
                 result = after_fence[..closing_idx].trim();
             }
@@ -67,10 +67,11 @@ fn strip_wrapping(s: &str) -> String {
     }
 
     // Strip single surrounding quotes (double or single)
-    if (result.starts_with('"') && result.ends_with('"')) ||
-       (result.starts_with('\'') && result.ends_with('\'')) {
+    if (result.starts_with('"') && result.ends_with('"'))
+        || (result.starts_with('\'') && result.ends_with('\''))
+    {
         if result.len() > 2 {
-            result = &result[1..result.len()-1];
+            result = &result[1..result.len() - 1];
         }
     }
 
@@ -192,7 +193,9 @@ impl GroqLlmClient {
             max_tokens: 10,   // Only need one word
         };
 
-        let result = self.send_request(&api_url, api_key.as_deref(), &request).await?;
+        let result = self
+            .send_request(&api_url, api_key.as_deref(), &request)
+            .await?;
         let result_upper = result.to_uppercase();
 
         let intent = if result_upper.contains("COMMAND") {
@@ -251,7 +254,8 @@ impl GroqLlmClient {
             max_tokens: 4096,
         };
 
-        self.send_request(&api_url, api_key.as_deref(), &request).await
+        self.send_request(&api_url, api_key.as_deref(), &request)
+            .await
     }
 
     /// Enhance a transcription for Dictation Mode
@@ -276,10 +280,7 @@ impl GroqLlmClient {
 
         // Build system prompt with optional style guidance
         let system_prompt = match style_prompt {
-            Some(style) => format!(
-                "{}\n\nStyle guidance: {}",
-                ENHANCE_SYSTEM_PROMPT, style
-            ),
+            Some(style) => format!("{}\n\nStyle guidance: {}", ENHANCE_SYSTEM_PROMPT, style),
             None => ENHANCE_SYSTEM_PROMPT.to_string(),
         };
 
@@ -299,7 +300,8 @@ impl GroqLlmClient {
             max_tokens: 4096,
         };
 
-        self.send_request(&api_url, api_key.as_deref(), &request).await
+        self.send_request(&api_url, api_key.as_deref(), &request)
+            .await
     }
 
     /// Send a request to the Groq API (or proxy)

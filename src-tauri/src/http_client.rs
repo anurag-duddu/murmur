@@ -61,7 +61,11 @@ mod tests {
     #[test]
     fn test_get_transcription_client() {
         let client = get_transcription_client();
-        assert!(client.is_ok(), "Failed to get transcription client: {:?}", client);
+        assert!(
+            client.is_ok(),
+            "Failed to get transcription client: {:?}",
+            client
+        );
     }
 
     #[tokio::test]
@@ -70,6 +74,9 @@ mod tests {
 
         // HTTP request should fail (HTTPS-only)
         let result = client.get("http://example.com").send().await;
-        assert!(result.is_err(), "HTTP request should fail with HTTPS-only client");
+        assert!(
+            result.is_err(),
+            "HTTP request should fail with HTTPS-only client"
+        );
     }
 }

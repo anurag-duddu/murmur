@@ -3,11 +3,12 @@ use std::time::Instant;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Emitter, Manager, Runtime, State, WindowEvent,
+    App, AppHandle, Emitter, Listener, Manager, Runtime, State, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod audio;
+mod auth;
 mod config;
 mod error;
 mod groq_llm;
@@ -24,7 +25,37 @@ mod whisper_api;
 use audio::{encode_samples_to_wav, AudioRecorder};
 use config::AppConfig;
 use groq_llm::{GroqLlmClient, UserIntent};
-use state::{DictationMode, ErrorEvent, RecordingState, StateChangeEvent, TranscriptionCompleteEvent};
+use state::{
+    DictationMode, ErrorEvent, RecordingState, StateChangeEvent, TranscriptionCompleteEvent,
+};
+
+// ============================================================================
+// SENTRY HELPERS
+// ============================================================================
+
+/// Add a breadcrumb to Sentry for debugging
+fn sentry_breadcrumb(category: &str, message: &str) {
+    sentry::add_breadcrumb(sentry::Breadcrumb {
+        category: Some(category.into()),
+        message: Some(message.into()),
+        level: sentry::Level::Info,
+        ..Default::default()
+    });
+}
+
+/// Capture an error to Sentry with context
+fn sentry_capture_error(error: &str, context: Option<&str>) {
+    sentry::with_scope(
+        |scope| {
+            if let Some(ctx) = context {
+                scope.set_extra("context", serde_json::Value::String(ctx.to_string()));
+            }
+        },
+        || {
+            sentry::capture_message(error, sentry::Level::Error);
+        },
+    );
+}
 
 // ============================================================================
 // CONSTANTS
@@ -57,6 +88,8 @@ pub struct AppState {
     active_bundle_id: Mutex<Option<String>>,
     /// Workspace file index for file tagging (built on startup)
     workspace_index: Mutex<Option<ide::file_index::WorkspaceIndex>>,
+    /// Flag to track when text insertion is in progress (prevents new recordings)
+    is_inserting: Mutex<bool>,
 }
 
 impl AppState {
@@ -71,6 +104,7 @@ impl AppState {
             active_style: Mutex::new(None),
             active_bundle_id: Mutex::new(None),
             workspace_index: Mutex::new(None),
+            is_inserting: Mutex::new(false),
         }
     }
 
@@ -101,10 +135,7 @@ impl AppState {
     }
 
     fn get_selected_text(&self) -> Option<String> {
-        self.selected_text
-            .lock()
-            .ok()
-            .and_then(|t| t.clone())
+        self.selected_text.lock().ok().and_then(|t| t.clone())
     }
 
     fn set_selected_text(&self, text: Option<String>) {
@@ -114,10 +145,7 @@ impl AppState {
     }
 
     fn get_active_style(&self) -> Option<styles::Style> {
-        self.active_style
-            .lock()
-            .ok()
-            .and_then(|s| s.clone())
+        self.active_style.lock().ok().and_then(|s| s.clone())
     }
 
     fn set_active_style(&self, style: Option<styles::Style>) {
@@ -127,10 +155,7 @@ impl AppState {
     }
 
     fn get_active_bundle_id(&self) -> Option<String> {
-        self.active_bundle_id
-            .lock()
-            .ok()
-            .and_then(|b| b.clone())
+        self.active_bundle_id.lock().ok().and_then(|b| b.clone())
     }
 
     fn set_active_bundle_id(&self, bundle_id: Option<String>) {
@@ -140,15 +165,22 @@ impl AppState {
     }
 
     fn get_workspace_index(&self) -> Option<ide::file_index::WorkspaceIndex> {
-        self.workspace_index
-            .lock()
-            .ok()
-            .and_then(|idx| idx.clone())
+        self.workspace_index.lock().ok().and_then(|idx| idx.clone())
     }
 
     fn set_workspace_index(&self, index: Option<ide::file_index::WorkspaceIndex>) {
         if let Ok(mut idx) = self.workspace_index.lock() {
             *idx = index;
+        }
+    }
+
+    fn is_inserting(&self) -> bool {
+        self.is_inserting.lock().map(|v| *v).unwrap_or(false)
+    }
+
+    fn set_inserting(&self, inserting: bool) {
+        if let Ok(mut v) = self.is_inserting.lock() {
+            *v = inserting;
         }
     }
 
@@ -201,22 +233,22 @@ fn emit_state_change(app: &AppHandle, state: &AppState, message: Option<String>)
     // Emit directly to overlay window (not broadcast) for reliable delivery
     if let Some(overlay) = app.get_webview_window("overlay") {
         if let Err(e) = overlay.emit("state-changed", &event) {
-            eprintln!("Failed to emit state change to overlay: {}", e);
+            log::error!("Failed to emit state change to overlay: {}", e);
         }
     }
 
     // Also broadcast to other windows (main window might want to know)
     let _ = app.emit("state-changed", &event);
 
-    println!("State changed to: {:?}", event.state);
+    log::info!("State changed to: {:?}", event.state);
 }
 
 /// Emit error event
 fn emit_error(app: &AppHandle, error: ErrorEvent) {
     if let Err(e) = app.emit("recording-error", &error) {
-        eprintln!("Failed to emit error: {}", e);
+        log::error!("Failed to emit error: {}", e);
     }
-    println!("Error: {} - {}", error.code, error.message);
+    log::info!("Error: {} - {}", error.code, error.message);
 }
 
 // ============================================================================
@@ -345,6 +377,12 @@ async fn stop_recording(app_handle: AppHandle, state: State<'_, AppState>) -> Re
     // Hide overlay, reactivate previous app, then insert text
     let app_clone = app_handle.clone();
     std::thread::spawn(move || {
+        // Set inserting flag to prevent new recordings during insertion
+        {
+            let state: tauri::State<'_, AppState> = app_clone.state();
+            state.set_inserting(true);
+        }
+
         // Brief delay to show "Done!" state
         std::thread::sleep(std::time::Duration::from_millis(DONE_DISPLAY_DELAY_MS));
         hide_overlay(&app_clone);
@@ -356,6 +394,12 @@ async fn stop_recording(app_handle: AppHandle, state: State<'_, AppState>) -> Re
         std::thread::sleep(std::time::Duration::from_millis(APP_FOCUS_WAIT_MS));
         // Insert text while preserving clipboard
         insert_text_directly(&final_text);
+
+        // Clear inserting flag
+        {
+            let state: tauri::State<'_, AppState> = app_clone.state();
+            state.set_inserting(false);
+        }
     });
 
     Ok(())
@@ -389,9 +433,8 @@ async fn process_recording_stop(
     })?;
 
     // Stop recording and get audio data (always use Whisper format)
-    let audio_samples_16khz = state.with_recorder_mut(|recorder| {
-        recorder.stop_recording_for_whisper()
-    })??;
+    let audio_samples_16khz =
+        state.with_recorder_mut(|recorder| recorder.stop_recording_for_whisper())??;
 
     // Check if we have audio
     if audio_samples_16khz.is_empty() {
@@ -424,7 +467,7 @@ async fn process_recording_stop(
     }
 
     #[cfg(debug_assertions)]
-    println!("Transcript (groq): {}", transcript);
+    log::info!("Transcript (groq): {}", transcript);
 
     // Apply IDE transformations if we're in a code editor
     let active_bundle_id = state.get_active_bundle_id();
@@ -441,7 +484,7 @@ async fn process_recording_stop(
             );
             #[cfg(debug_assertions)]
             if transformed != transcript {
-                println!("IDE transformed: {}", transformed);
+                log::info!("IDE transformed: {}", transformed);
             }
             transformed
         } else {
@@ -464,9 +507,7 @@ async fn process_recording_stop(
                 Some(text) => text,
                 None => {
                     #[cfg(debug_assertions)]
-                    println!(
-                        "Command Mode but no selected text, falling back to raw transcript"
-                    );
+                    log::info!("Command Mode but no selected text, falling back to raw transcript");
                     transcript.clone()
                 }
             };
@@ -479,9 +520,12 @@ async fn process_recording_stop(
 
             let intent = match groq_client.classify_intent(&transcript).await {
                 Ok(i) => i,
-                Err(e) => {
+                Err(_e) => {
                     #[cfg(debug_assertions)]
-                    println!("Intent classification failed, defaulting to Dictation: {}", e);
+                    log::info!(
+                        "Intent classification failed, defaulting to Dictation: {}",
+                        _e
+                    );
                     UserIntent::Dictation
                 }
             };
@@ -489,15 +533,18 @@ async fn process_recording_stop(
             match intent {
                 UserIntent::Command => {
                     emit_state_change(app_handle, state, Some("Transforming...".to_string()));
-                    match groq_client.transform_text(&selected_text, &transcript).await {
+                    match groq_client
+                        .transform_text(&selected_text, &transcript)
+                        .await
+                    {
                         Ok(transformed) => {
                             #[cfg(debug_assertions)]
-                            println!("Transformed text: {}", transformed);
+                            log::info!("Transformed text: {}", transformed);
                             transformed
                         }
                         Err(e) => {
                             #[cfg(debug_assertions)]
-                            println!("Transformation failed, keeping original: {}", e);
+                            log::info!("Transformation failed, keeping original: {}", e);
                             emit_error(
                                 app_handle,
                                 ErrorEvent::groq_error(&e, Some(selected_text.clone())),
@@ -508,24 +555,24 @@ async fn process_recording_stop(
                 }
                 UserIntent::Dictation => {
                     #[cfg(debug_assertions)]
-                    println!("Intent: Dictation - will replace selection with new content");
+                    log::info!("Intent: Dictation - will replace selection with new content");
                     emit_state_change(app_handle, state, Some("Enhancing...".to_string()));
 
                     let style_prompt = active_style.as_ref().map(|s| {
                         #[cfg(debug_assertions)]
-                        println!("Applying style: {} ({})", s.name, s.id);
+                        log::info!("Applying style: {} ({})", s.name, s.id);
                         s.prompt_modifier.as_str()
                     });
 
                     match groq_client.enhance_text(&transcript, style_prompt).await {
                         Ok(enhanced) => {
                             #[cfg(debug_assertions)]
-                            println!("Enhanced dictation (replacing selection): {}", enhanced);
+                            log::info!("Enhanced dictation (replacing selection): {}", enhanced);
                             enhanced
                         }
                         Err(e) => {
                             #[cfg(debug_assertions)]
-                            println!("Enhancement failed, using raw transcript: {}", e);
+                            log::info!("Enhancement failed, using raw transcript: {}", e);
                             emit_error(
                                 app_handle,
                                 ErrorEvent::groq_error(&e, Some(transcript.clone())),
@@ -543,24 +590,24 @@ async fn process_recording_stop(
 
             let style_prompt = active_style.as_ref().map(|s| {
                 #[cfg(debug_assertions)]
-                println!("Applying style: {} ({})", s.name, s.id);
+                log::info!("Applying style: {} ({})", s.name, s.id);
                 s.prompt_modifier.as_str()
             });
 
             let groq_client = GroqLlmClient::new()?;
 
             #[cfg(debug_assertions)]
-            println!("Before LLM enhancement: {}", transcript);
+            log::info!("Before LLM enhancement: {}", transcript);
 
             match groq_client.enhance_text(&transcript, style_prompt).await {
                 Ok(enhanced) => {
                     #[cfg(debug_assertions)]
-                    println!("Enhanced with Groq: {}", enhanced);
+                    log::info!("Enhanced with Groq: {}", enhanced);
                     enhanced
                 }
                 Err(groq_error) => {
                     #[cfg(debug_assertions)]
-                    println!("Groq enhancement failed: {}", groq_error);
+                    log::info!("Groq enhancement failed: {}", groq_error);
                     emit_error(
                         app_handle,
                         ErrorEvent::groq_error(&groq_error, Some(transcript.clone())),
@@ -582,7 +629,7 @@ async fn process_recording_stop(
     };
 
     if let Err(e) = app_handle.emit("transcription-complete", &completion_event) {
-        eprintln!("Failed to emit completion: {}", e);
+        log::error!("Failed to emit completion: {}", e);
     }
 
     // Reset state
@@ -627,12 +674,8 @@ async fn toggle_recording(app_handle: AppHandle, state: State<'_, AppState>) -> 
     let current_state = state.get_state();
 
     match current_state {
-        RecordingState::Idle | RecordingState::Error => {
-            start_recording(app_handle, state).await
-        }
-        RecordingState::Recording => {
-            stop_recording(app_handle, state).await
-        }
+        RecordingState::Idle | RecordingState::Error => start_recording(app_handle, state).await,
+        RecordingState::Recording => stop_recording(app_handle, state).await,
         _ => {
             // Transcribing or Enhancing - can't toggle, maybe cancel?
             Ok(())
@@ -716,6 +759,11 @@ fn open_accessibility_settings() -> Result<(), String> {
 }
 
 #[tauri::command]
+fn request_accessibility_permission() -> bool {
+    permissions::request_accessibility_permission()
+}
+
+#[tauri::command]
 fn set_selected_microphone(device_id: String) -> Result<(), String> {
     // Input validation: device_id must be non-empty and reasonable length
     let trimmed = device_id.trim();
@@ -756,17 +804,46 @@ fn is_onboarding_complete() -> bool {
     permissions::is_onboarding_complete()
 }
 
+/// Check if this is a re-authorization scenario (onboarding was complete but permissions revoked)
+/// This happens when the app is rebuilt/reinstalled and macOS revokes accessibility permissions
+#[tauri::command]
+fn needs_reauthorization() -> bool {
+    permissions::is_onboarding_complete() && !permissions::check_accessibility_permission()
+}
+
 #[tauri::command]
 fn complete_onboarding(app_handle: AppHandle) -> Result<(), String> {
+    // Verify permissions are still granted before completing
+    if !permissions::check_accessibility_permission() {
+        return Err(
+            "Accessibility permission not granted. Please grant permission and try again."
+                .to_string(),
+        );
+    }
+
     permissions::mark_onboarding_complete()?;
+
+    // Set activation policy to accessory (menu bar mode) before closing onboarding
+    #[cfg(target_os = "macos")]
+    let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
     // Hide onboarding window and show that app is ready
     if let Some(onboarding) = app_handle.get_webview_window("onboarding") {
         let _ = onboarding.close();
     }
 
-    println!("Onboarding completed, app is ready!");
+    log::info!("Onboarding completed, app is ready!");
     Ok(())
+}
+
+/// Restart the application
+/// Used when accessibility permission needs a restart to take effect
+#[tauri::command]
+fn restart_app(app_handle: AppHandle) -> Result<(), String> {
+    log::info!("Restarting application...");
+
+    // Use Tauri's process restart API
+    tauri::process::restart(&app_handle.env());
 }
 
 // ============================================================================
@@ -840,10 +917,7 @@ fn validate_workspace_path(path: &std::path::Path) -> Result<std::path::PathBuf,
     let path_str = relative_to_home.to_string_lossy();
     for blocked in BLOCKED_DIRECTORIES {
         if path_str.starts_with(blocked) || path_str.contains(&format!("/{}/", blocked)) {
-            return Err(format!(
-                "Cannot index sensitive directory: {}",
-                blocked
-            ));
+            return Err(format!("Cannot index sensitive directory: {}", blocked));
         }
     }
 
@@ -871,14 +945,21 @@ fn set_workspace_root(
     // Validate path security (canonicalize, check boundaries, block sensitive dirs)
     let validated_path = validate_workspace_path(workspace_path)?;
 
-    println!("[WORKSPACE] Building index for: {}", validated_path.display());
+    log::info!(
+        "[WORKSPACE] Building index for: {}",
+        validated_path.display()
+    );
 
     match ide::file_index::WorkspaceIndex::build(&validated_path) {
         Ok(index) => {
             let file_count = index.file_count();
             let files_skipped = index.files_skipped;
             state.set_workspace_index(Some(index));
-            println!("[WORKSPACE] Index built: {} files indexed, {} skipped", file_count, files_skipped);
+            log::info!(
+                "[WORKSPACE] Index built: {} files indexed, {} skipped",
+                file_count,
+                files_skipped
+            );
             Ok(WorkspaceIndexStatus {
                 indexed: true,
                 root: Some(validated_path.to_string_lossy().to_string()),
@@ -887,7 +968,7 @@ fn set_workspace_root(
             })
         }
         Err(e) => {
-            println!("[WORKSPACE] Failed to build index: {}", e);
+            log::info!("[WORKSPACE] Failed to build index: {}", e);
             Err(e)
         }
     }
@@ -916,7 +997,47 @@ fn get_workspace_status(state: State<'_, AppState>) -> WorkspaceIndexStatus {
 #[tauri::command]
 fn clear_workspace_index(state: State<'_, AppState>) {
     state.set_workspace_index(None);
-    println!("[WORKSPACE] Index cleared");
+    log::info!("[WORKSPACE] Index cleared");
+}
+
+// ============================================================================
+// AUTHENTICATION COMMANDS
+// ============================================================================
+
+/// Get the current authentication state
+#[tauri::command]
+fn get_auth_state() -> auth::AuthState {
+    auth::get_auth_state()
+}
+
+/// Start the OAuth authentication flow (opens browser)
+#[tauri::command]
+fn start_auth(app: AppHandle) -> Result<(), String> {
+    auth::start_auth_flow(&app).map_err(|e| e.to_string())
+}
+
+/// Log out the current user
+#[tauri::command]
+fn logout(app: AppHandle) -> Result<(), String> {
+    auth::logout(&app).map_err(|e| e.to_string())
+}
+
+/// Get the current user's information
+#[tauri::command]
+fn get_user_info() -> Result<Option<auth::UserInfo>, String> {
+    let result = auth::get_user_info().map_err(|e| e.to_string());
+    match &result {
+        Ok(Some(user)) => log::info!("[AUTH] get_user_info returned user: {}", user.email),
+        Ok(None) => log::info!("[AUTH] get_user_info returned None"),
+        Err(e) => log::error!("[AUTH] get_user_info error: {}", e),
+    }
+    result
+}
+
+/// Check if user is authenticated
+#[tauri::command]
+fn is_authenticated() -> bool {
+    auth::is_authenticated()
 }
 
 /// Workspace index status response
@@ -932,7 +1053,14 @@ pub struct WorkspaceIndexStatus {
 /// Insert text directly at cursor position
 /// Uses AppleScript keystroke for ASCII, clipboard paste for Unicode
 fn insert_text_directly(text: &str) {
-    println!("[INSERT] insert_text_directly called with {} chars", text.len());
+    log::info!(
+        "[INSERT] insert_text_directly called with {} chars",
+        text.len()
+    );
+    sentry_breadcrumb(
+        "insertion",
+        &format!("Starting text insertion ({} chars)", text.len()),
+    );
 
     #[cfg(target_os = "macos")]
     {
@@ -949,7 +1077,11 @@ fn insert_text_directly(text: &str) {
             .collect::<Vec<&str>>()
             .join(" ");
 
-        println!("[INSERT] Clean text ({} chars): {:?}", clean_text.len(), &clean_text[..clean_text.len().min(50)]);
+        log::info!(
+            "[INSERT] Clean text ({} chars): {:?}",
+            clean_text.len(),
+            &clean_text[..clean_text.len().min(50)]
+        );
 
         // Check if text contains non-ASCII characters (Unicode)
         let has_unicode = clean_text.chars().any(|c| !c.is_ascii());
@@ -957,13 +1089,25 @@ fn insert_text_directly(text: &str) {
         if has_unicode {
             // For Unicode text (Hindi, Telugu, Tamil, etc.), use clipboard paste
             // AppleScript's keystroke command doesn't handle non-ASCII characters
-            println!("[INSERT] Using clipboard paste (Unicode detected)");
+            log::info!("[INSERT] Using clipboard paste (Unicode detected)");
+            sentry_breadcrumb(
+                "insertion",
+                &format!(
+                    "Using clipboard method ({} chars, Unicode)",
+                    clean_text.len()
+                ),
+            );
             insert_via_clipboard_preserving(&clean_text);
         } else {
             // For ASCII-only text, use keystroke (faster, no clipboard impact)
-            println!("[INSERT] Using keystroke (ASCII only)");
+            log::info!("[INSERT] Using keystroke (ASCII only)");
+            sentry_breadcrumb(
+                "insertion",
+                &format!("Using keystroke method ({} chars, ASCII)", clean_text.len()),
+            );
             insert_via_keystroke(&clean_text);
         }
+        sentry_breadcrumb("insertion", "Text insertion completed");
     }
 }
 
@@ -978,83 +1122,174 @@ fn insert_text_directly(text: &str) {
 /// - Tabs (converted to AppleScript tab concatenation)
 #[cfg(target_os = "macos")]
 fn escape_applescript_string(text: &str) -> String {
-    text.replace("\\", "\\\\")       // Backslash must be first
-        .replace("\"", "\\\"")        // Double quotes
+    text.replace("\\", "\\\\") // Backslash must be first
+        .replace("\"", "\\\"") // Double quotes
         .replace("&", "\" & \"&\" & \"") // Escape ampersands to prevent injection
-        .replace("\r", "")            // Remove carriage returns (handled separately)
-        .replace("\t", "\" & tab & \"")  // Tabs as AppleScript concatenation
+        .replace("\r", "") // Remove carriage returns (handled separately)
+        .replace("\t", "\" & tab & \"") // Tabs as AppleScript concatenation
 }
 
+/// Maximum characters per keystroke chunk to prevent buffer issues
+/// Longer texts are split into chunks with small delays between them
+const KEYSTROKE_CHUNK_SIZE: usize = 500;
+
 /// Insert ASCII text using AppleScript keystroke (doesn't touch clipboard)
+/// For long texts, uses chunking with delays to prevent dropped characters.
 #[cfg(target_os = "macos")]
 fn insert_via_keystroke(text: &str) {
-    use std::process::Command;
+    log::info!(
+        "[KEYSTROKE] Starting keystroke insertion for {} chars",
+        text.len()
+    );
 
-    println!("[KEYSTROKE] Starting keystroke insertion for {} chars", text.len());
+    // For longer texts, use chunked keystroke insertion to prevent buffer issues
+    if text.len() > KEYSTROKE_CHUNK_SIZE {
+        log::info!(
+            "[KEYSTROKE] Chunking text into {} char segments",
+            KEYSTROKE_CHUNK_SIZE
+        );
+        insert_via_keystroke_chunked(text);
+        return;
+    }
 
-    // Escape text for AppleScript string using robust escaping
+    // For short texts, use single keystroke command
     let escaped_text = escape_applescript_string(text);
-
-    // Use keystroke to type text directly
-    let script = if text.contains('\n') {
-        // Handle multi-line text by splitting and using return key
-        let lines: Vec<&str> = text.split('\n').collect();
-        let mut script_parts = Vec::new();
-
-        for (i, line) in lines.iter().enumerate() {
-            let escaped_line = escape_applescript_string(line);
-            if !escaped_line.is_empty() {
-                script_parts.push(format!("keystroke \"{}\"", escaped_line));
-            }
-            if i < lines.len() - 1 {
-                script_parts.push("key code 36".to_string()); // Return key
-            }
-        }
-
-        format!(
-            r#"tell application "System Events"
-    {}
+    let script = format!(
+        r#"tell application "System Events"
+    keystroke "{}"
 end tell"#,
-            script_parts.join("\n    ")
-        )
-    } else {
-        format!(
+        escaped_text
+    );
+
+    execute_keystroke_script(&script, text.len());
+}
+
+/// Insert text using chunked keystrokes with delays between chunks
+#[cfg(target_os = "macos")]
+fn insert_via_keystroke_chunked(text: &str) {
+    use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
+
+    let chars: Vec<char> = text.chars().collect();
+    let total_chunks = (chars.len() + KEYSTROKE_CHUNK_SIZE - 1) / KEYSTROKE_CHUNK_SIZE;
+
+    log::info!(
+        "[KEYSTROKE] Inserting {} chars in {} chunks",
+        chars.len(),
+        total_chunks
+    );
+
+    for (i, chunk) in chars.chunks(KEYSTROKE_CHUNK_SIZE).enumerate() {
+        let chunk_text: String = chunk.iter().collect();
+        let escaped_text = escape_applescript_string(&chunk_text);
+
+        let script = format!(
             r#"tell application "System Events"
     keystroke "{}"
 end tell"#,
             escaped_text
-        )
-    };
+        );
 
-    println!("[KEYSTROKE] Executing osascript...");
-    let result = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output();
+        log::info!(
+            "[KEYSTROKE] Sending chunk {}/{} ({} chars)",
+            i + 1,
+            total_chunks,
+            chunk_text.len()
+        );
+
+        let result = Command::new("osascript").arg("-e").arg(&script).output();
+
+        match result {
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !output.status.success() || !stderr.is_empty() {
+                    if stderr.contains("not allowed")
+                        || stderr.contains("assistive")
+                        || stderr.contains("1002")
+                    {
+                        log::error!("=======================================================");
+                        log::error!("ACCESSIBILITY PERMISSION REQUIRED");
+                        log::error!("Go to: System Settings > Privacy & Security > Accessibility");
+                        log::error!("Add Keyhold.app and ensure it's enabled");
+                        log::error!("Then QUIT and RELAUNCH the app");
+                        log::error!("=======================================================");
+                        sentry_capture_error(
+                            "Accessibility permission denied during keystroke insertion",
+                            None,
+                        );
+                        return; // Stop on permission error
+                    } else if !stderr.is_empty() {
+                        log::error!("[KEYSTROKE] Chunk {} error: {}", i + 1, stderr);
+                        sentry_capture_error(
+                            &format!("Keystroke chunk {} failed", i + 1),
+                            Some(&stderr),
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("[KEYSTROKE] Failed to execute chunk {}: {}", i + 1, e);
+                sentry_capture_error(
+                    &format!("Failed to execute osascript for chunk {}", i + 1),
+                    Some(&e.to_string()),
+                );
+                return; // Stop on error
+            }
+        }
+
+        // Small delay between chunks to let the target app process
+        if i < total_chunks - 1 {
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    log::info!(
+        "[KEYSTROKE] All {} chunks inserted successfully",
+        total_chunks
+    );
+}
+
+/// Execute a keystroke AppleScript and handle the result
+#[cfg(target_os = "macos")]
+fn execute_keystroke_script(script: &str, char_count: usize) {
+    use std::process::Command;
+
+    log::info!(
+        "[KEYSTROKE] Executing osascript for {} chars...",
+        char_count
+    );
+    let result = Command::new("osascript").arg("-e").arg(script).output();
 
     match result {
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            println!("[KEYSTROKE] osascript exit code: {:?}", output.status.code());
+            log::info!(
+                "[KEYSTROKE] osascript exit code: {:?}",
+                output.status.code()
+            );
             if !stdout.is_empty() {
-                println!("[KEYSTROKE] osascript stdout: {}", stdout);
+                log::info!("[KEYSTROKE] osascript stdout: {}", stdout);
             }
             if output.status.success() && stderr.is_empty() {
-                println!("[KEYSTROKE] Text inserted via keystroke (clipboard untouched)");
-            } else if stderr.contains("not allowed") || stderr.contains("assistive") || stderr.contains("1002") {
-                eprintln!("=======================================================");
-                eprintln!("ACCESSIBILITY PERMISSION REQUIRED");
-                eprintln!("Go to: System Settings > Privacy & Security > Accessibility");
-                eprintln!("Add Murmur.app and ensure it's enabled");
-                eprintln!("Then QUIT and RELAUNCH the app");
-                eprintln!("=======================================================");
+                log::info!("[KEYSTROKE] Text inserted via keystroke (clipboard untouched)");
+            } else if stderr.contains("not allowed")
+                || stderr.contains("assistive")
+                || stderr.contains("1002")
+            {
+                log::error!("=======================================================");
+                log::error!("ACCESSIBILITY PERMISSION REQUIRED");
+                log::error!("Go to: System Settings > Privacy & Security > Accessibility");
+                log::error!("Add Keyhold.app and ensure it's enabled");
+                log::error!("Then QUIT and RELAUNCH the app");
+                log::error!("=======================================================");
             } else if !stderr.is_empty() {
-                eprintln!("[KEYSTROKE] osascript stderr: {}", stderr);
+                log::error!("[KEYSTROKE] osascript stderr: {}", stderr);
             }
         }
         Err(e) => {
-            eprintln!("[KEYSTROKE] Failed to execute osascript: {}", e);
+            log::error!("[KEYSTROKE] Failed to execute osascript: {}", e);
         }
     }
 }
@@ -1099,29 +1334,29 @@ fn insert_via_clipboard_preserving(text: &str) {
         escaped_text
     );
 
-    let result = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output();
+    let result = Command::new("osascript").arg("-e").arg(&script).output();
 
     match result {
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if output.status.success() && stderr.is_empty() {
-                println!("Unicode text inserted via clipboard (original clipboard restored)");
-            } else if stderr.contains("not allowed") || stderr.contains("assistive") || stderr.contains("1002") {
-                eprintln!("=======================================================");
-                eprintln!("ACCESSIBILITY PERMISSION REQUIRED");
-                eprintln!("Go to: System Settings > Privacy & Security > Accessibility");
-                eprintln!("Add Murmur.app and ensure it's enabled");
-                eprintln!("Then QUIT and RELAUNCH the app");
-                eprintln!("=======================================================");
+                log::info!("Unicode text inserted via clipboard (original clipboard restored)");
+            } else if stderr.contains("not allowed")
+                || stderr.contains("assistive")
+                || stderr.contains("1002")
+            {
+                log::error!("=======================================================");
+                log::error!("ACCESSIBILITY PERMISSION REQUIRED");
+                log::error!("Go to: System Settings > Privacy & Security > Accessibility");
+                log::error!("Add Keyhold.app and ensure it's enabled");
+                log::error!("Then QUIT and RELAUNCH the app");
+                log::error!("=======================================================");
             } else if !stderr.is_empty() {
-                eprintln!("osascript stderr: {}", stderr);
+                log::error!("osascript stderr: {}", stderr);
             }
         }
         Err(e) => {
-            eprintln!("Failed to execute osascript: {}", e);
+            log::error!("Failed to execute osascript: {}", e);
         }
     }
 }
@@ -1140,11 +1375,11 @@ fn hide_overlay(app: &AppHandle) {
 fn activate_app_by_bundle_id(bundle_id: &str) {
     use std::process::Command;
 
-    println!("[ACTIVATE] Attempting to activate app: {}", bundle_id);
+    log::info!("[ACTIVATE] Attempting to activate app: {}", bundle_id);
 
     // Don't try to activate ourselves - that could cause issues
     if bundle_id == "com.idstuart.murmur" {
-        println!("[ACTIVATE] Skipping self-activation");
+        log::info!("[ACTIVATE] Skipping self-activation");
         return;
     }
 
@@ -1155,22 +1390,23 @@ fn activate_app_by_bundle_id(bundle_id: &str) {
         bundle_id.replace("\"", "\\\"")
     );
 
-    let result = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output();
+    let result = Command::new("osascript").arg("-e").arg(&script).output();
 
     match result {
         Ok(output) => {
             if output.status.success() {
-                println!("[ACTIVATE] Successfully activated app: {}", bundle_id);
+                log::info!("[ACTIVATE] Successfully activated app: {}", bundle_id);
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                eprintln!("[ACTIVATE] Failed to activate app {}: {}", bundle_id, stderr);
+                log::error!(
+                    "[ACTIVATE] Failed to activate app {}: {}",
+                    bundle_id,
+                    stderr
+                );
             }
         }
         Err(e) => {
-            eprintln!("[ACTIVATE] Failed to run osascript: {}", e);
+            log::error!("[ACTIVATE] Failed to run osascript: {}", e);
         }
     }
 }
@@ -1192,8 +1428,10 @@ fn position_overlay_center_bottom(overlay: &tauri::WebviewWindow, bottom_offset:
         // Get overlay window size
         if let Ok(overlay_size) = overlay.outer_size() {
             // Calculate center-bottom position
-            let x = screen_position.x + ((screen_size.width as i32 - overlay_size.width as i32) / 2);
-            let y = screen_position.y + (screen_size.height as i32 - overlay_size.height as i32 - bottom_offset);
+            let x =
+                screen_position.x + ((screen_size.width as i32 - overlay_size.width as i32) / 2);
+            let y = screen_position.y
+                + (screen_size.height as i32 - overlay_size.height as i32 - bottom_offset);
 
             let _ = overlay.set_position(PhysicalPosition::new(x, y));
         }
@@ -1207,8 +1445,13 @@ fn position_overlay_center_bottom(overlay: &tauri::WebviewWindow, bottom_offset:
 fn create_tray_menu(app: &AppHandle) -> Result<Menu<impl Runtime>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
 
-    let start_dictation =
-        MenuItem::with_id(app, "start_dictation", "Start Dictation", true, None::<&str>)?;
+    let start_dictation = MenuItem::with_id(
+        app,
+        "start_dictation",
+        "Start Dictation",
+        true,
+        None::<&str>,
+    )?;
     menu.append(&start_dictation)?;
 
     let separator = MenuItem::new(app, "-", false, None::<&str>)?;
@@ -1359,7 +1602,7 @@ fn parse_hotkey(hotkey: &str) -> Option<Shortcut> {
             "shift" => modifiers |= Modifiers::SHIFT,
             "fn" => {
                 #[cfg(debug_assertions)]
-                println!("Warning: Fn key is not supported in global shortcuts, ignoring");
+                log::info!("Warning: Fn key is not supported in global shortcuts, ignoring");
             }
             // Key codes - use lookup function
             _ => {
@@ -1367,7 +1610,7 @@ fn parse_hotkey(hotkey: &str) -> Option<Shortcut> {
                     key_code = Some(code);
                 } else {
                     #[cfg(debug_assertions)]
-                    println!("Unknown key: {}", part);
+                    log::info!("Unknown key: {}", part);
                 }
             }
         }
@@ -1385,10 +1628,16 @@ fn parse_hotkey(hotkey: &str) -> Option<Shortcut> {
 fn shortcut_start_recording(app_handle: &AppHandle) {
     let state: tauri::State<'_, AppState> = app_handle.state();
 
+    // Check if text insertion is in progress - don't start recording if so
+    if state.is_inserting() {
+        log::info!("[HOTKEY] Cannot start recording: text insertion in progress");
+        return;
+    }
+
     // Check if we can start
     let current_state = state.get_state();
     if !current_state.can_start_recording() {
-        println!("Cannot start recording from state: {:?}", current_state);
+        log::info!("Cannot start recording from state: {:?}", current_state);
         return;
     }
 
@@ -1409,7 +1658,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
 
     // 1. Capture active app (fast: ~10-20ms via lsappinfo)
     let active_app_before_overlay = styles::detection::get_active_app();
-    println!(
+    log::info!(
         "[TIMING] get_active_app: {:?} - bundle: {:?}",
         hotkey_start.elapsed(),
         active_app_before_overlay.as_ref().map(|a| &a.bundle_id)
@@ -1430,7 +1679,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
         let _ = overlay.show();
     }
     #[cfg(debug_assertions)]
-    println!("[TIMING] Hotkey-to-overlay: {:?}", hotkey_start.elapsed());
+    log::info!("[TIMING] Hotkey-to-overlay: {:?}", hotkey_start.elapsed());
 
     // Emit initial state (Dictation mode)
     emit_state_change(app_handle, &state, Some("Recording...".to_string()));
@@ -1450,14 +1699,15 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
             return;
         }
 
-        let selection_start = std::time::Instant::now();
         let selection = platform::selection::get_selected_text().ok();
         #[cfg(debug_assertions)]
-        println!(
-            "[TIMING] get_selected_text (async): {:?} - {} chars",
-            selection_start.elapsed(),
-            selection.as_ref().map(|s| s.len()).unwrap_or(0)
-        );
+        {
+            let _timing_chars = selection.as_ref().map(|s| s.len()).unwrap_or(0);
+            log::info!(
+                "[TIMING] get_selected_text (async): {} chars",
+                _timing_chars
+            );
+        }
 
         if let Some(text) = selection {
             // Check if still recording before switching mode
@@ -1470,7 +1720,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
                     Some("Command Mode".to_string()),
                 );
                 #[cfg(debug_assertions)]
-                println!("[MODE] Switched to Command Mode");
+                log::info!("[MODE] Switched to Command Mode");
             }
         }
     });
@@ -1480,7 +1730,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
         let mut recorder = match state.recorder.lock() {
             Ok(r) => r,
             Err(e) => {
-                println!("Failed to lock recorder: {}", e);
+                log::info!("Failed to lock recorder: {}", e);
                 state.set_state(RecordingState::Error);
                 return;
             }
@@ -1492,7 +1742,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
     if let Err(e) = result {
         state.set_state(RecordingState::Error);
         emit_error(app_handle, ErrorEvent::no_audio_device());
-        println!("Failed to start recording: {}", e);
+        log::info!("Failed to start recording: {}", e);
         return;
     }
 
@@ -1522,12 +1772,17 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
             None => styles::get_default_style(),
         };
 
-        let is_ide = bundle_id.as_ref().map(|b| ide::is_ide(b)).unwrap_or(false);
         #[cfg(debug_assertions)]
-        println!(
-            "Context processed (async): style={} ({}), bundle={:?}, is_ide={}",
-            active_style.name, active_style.id, bundle_id, is_ide
-        );
+        {
+            let is_ide = bundle_id.as_ref().map(|b| ide::is_ide(b)).unwrap_or(false);
+            log::info!(
+                "Context processed (async): style={} ({}), bundle={:?}, is_ide={}",
+                active_style.name,
+                active_style.id,
+                bundle_id,
+                is_ide
+            );
+        }
 
         // Store context in state for use during transcription processing
         state.set_active_style(Some(active_style));
@@ -1537,7 +1792,7 @@ fn shortcut_start_recording(app_handle: &AppHandle) {
 
 /// Internal function to stop recording from shortcut
 fn shortcut_stop_recording(app_handle: AppHandle) {
-    println!("[STOP] shortcut_stop_recording called");
+    log::info!("[STOP] shortcut_stop_recording called");
     let app_handle_clone = app_handle.clone();
 
     // Spawn async task to handle the stop
@@ -1547,42 +1802,62 @@ fn shortcut_stop_recording(app_handle: AppHandle) {
         // Check if we can stop
         let current_state = state.get_state();
         if !current_state.can_stop_recording() {
-            println!("[STOP] Cannot stop recording from state: {:?}", current_state);
+            log::info!(
+                "[STOP] Cannot stop recording from state: {:?}",
+                current_state
+            );
             return;
         }
 
         // Capture the bundle_id BEFORE processing clears it
         let bundle_id = state.get_active_bundle_id();
-        println!("[STOP] Captured bundle_id: {:?}", bundle_id);
+        log::info!("[STOP] Captured bundle_id: {:?}", bundle_id);
 
         // Use shared processing logic
         match process_recording_stop(&app_handle_clone, &state).await {
             Ok(final_text) => {
-                println!("[STOP] process_recording_stop succeeded, text: {} chars", final_text.len());
+                log::info!(
+                    "[STOP] process_recording_stop succeeded, text: {} chars",
+                    final_text.len()
+                );
                 // Hide overlay, reactivate previous app, then insert text
                 let app_for_hide = app_handle_clone.clone();
                 std::thread::spawn(move || {
+                    // Set inserting flag to prevent new recordings during insertion
+                    {
+                        let state: tauri::State<'_, AppState> = app_for_hide.state();
+                        state.set_inserting(true);
+                        log::info!("[STOP] Set is_inserting=true");
+                    }
+
                     // Brief delay to show "Done!" state
                     std::thread::sleep(std::time::Duration::from_millis(DONE_DISPLAY_DELAY_MS));
-                    println!("[STOP] Hiding overlay");
+                    log::info!("[STOP] Hiding overlay");
                     hide_overlay(&app_for_hide);
                     // Reactivate the previous app explicitly
                     if let Some(ref bid) = bundle_id {
-                        println!("[STOP] Reactivating app: {}", bid);
+                        log::info!("[STOP] Reactivating app: {}", bid);
                         activate_app_by_bundle_id(bid);
                     } else {
-                        println!("[STOP] No bundle_id to reactivate");
+                        log::info!("[STOP] No bundle_id to reactivate");
                     }
                     // Wait for the app to regain focus
                     std::thread::sleep(std::time::Duration::from_millis(APP_FOCUS_WAIT_MS));
-                    println!("[STOP] Calling insert_text_directly");
+                    log::info!("[STOP] Calling insert_text_directly");
                     // Insert text (this replaces selection in Command Mode, inserts at cursor in Dictation Mode)
                     insert_text_directly(&final_text);
-                    println!("[STOP] insert_text_directly completed");
+                    log::info!("[STOP] insert_text_directly completed");
+
+                    // Clear inserting flag
+                    {
+                        let state: tauri::State<'_, AppState> = app_for_hide.state();
+                        state.set_inserting(false);
+                        log::info!("[STOP] Set is_inserting=false");
+                    }
                 });
             }
             Err(e) => {
-                eprintln!("[STOP] Recording stop failed: {}", e);
+                log::error!("[STOP] Recording stop failed: {}", e);
                 // Error state and overlay hiding already handled in process_recording_stop
             }
         }
@@ -1612,24 +1887,30 @@ fn setup_global_shortcuts(
     hotkey: &str,
     _mode: &str, // Not used anymore - we read dynamically from config
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("=======================================================");
-    println!("[STARTUP] Setting up global shortcuts");
-    println!("[STARTUP] Requested hotkey: '{}'", hotkey);
+    log::info!("=======================================================");
+    log::info!("[STARTUP] Setting up global shortcuts");
+    log::info!("[STARTUP] Requested hotkey: '{}'", hotkey);
 
     // Parse the hotkey string
     let shortcut = match parse_hotkey(hotkey) {
         Some(s) => {
-            println!("[STARTUP] Parsed hotkey successfully: {:?}", s);
+            log::info!("[STARTUP] Parsed hotkey successfully: {:?}", s);
             s
         }
         None => {
             // Default to Option+Space if parsing fails
-            println!("[STARTUP] WARNING: Failed to parse hotkey '{}', using default Option+Space", hotkey);
-            Shortcut::new(Some(Modifiers::ALT), tauri_plugin_global_shortcut::Code::Space)
+            log::info!(
+                "[STARTUP] WARNING: Failed to parse hotkey '{}', using default Option+Space",
+                hotkey
+            );
+            Shortcut::new(
+                Some(Modifiers::ALT),
+                tauri_plugin_global_shortcut::Code::Space,
+            )
         }
     };
 
-    println!("[STARTUP] Registering global shortcut: {:?}", shortcut);
+    log::info!("[STARTUP] Registering global shortcut: {:?}", shortcut);
 
     // Register the shortcut with key state handling
     // IMPORTANT: Read recording_mode dynamically from config each time,
@@ -1637,7 +1918,11 @@ fn setup_global_shortcuts(
     app.handle().plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, shortcut, event| {
-                println!("[HOTKEY] Shortcut event received: {:?} - {:?}", shortcut, event.state);
+                log::info!(
+                    "[HOTKEY] Shortcut event received: {:?} - {:?}",
+                    shortcut,
+                    event.state
+                );
 
                 // Read current mode from config (not captured at startup)
                 let is_push_to_talk = {
@@ -1651,7 +1936,25 @@ fn setup_global_shortcuts(
 
                 match event.state {
                     ShortcutState::Pressed => {
-                        println!("[HOTKEY] Shortcut PRESSED, mode: {}", if is_push_to_talk { "push-to-talk" } else { "toggle" });
+                        log::info!(
+                            "[HOTKEY] Shortcut PRESSED, mode: {}",
+                            if is_push_to_talk {
+                                "push-to-talk"
+                            } else {
+                                "toggle"
+                            }
+                        );
+                        sentry_breadcrumb(
+                            "hotkey",
+                            &format!(
+                                "Hotkey pressed ({})",
+                                if is_push_to_talk {
+                                    "push-to-talk"
+                                } else {
+                                    "toggle"
+                                }
+                            ),
+                        );
                         if is_push_to_talk {
                             // Push-to-talk: start recording on press
                             shortcut_start_recording(app);
@@ -1661,7 +1964,8 @@ fn setup_global_shortcuts(
                         }
                     }
                     ShortcutState::Released => {
-                        println!("[HOTKEY] Shortcut RELEASED");
+                        log::info!("[HOTKEY] Shortcut RELEASED");
+                        sentry_breadcrumb("hotkey", "Hotkey released");
                         if is_push_to_talk {
                             // Push-to-talk: stop recording on release
                             shortcut_stop_recording(app.clone());
@@ -1676,18 +1980,18 @@ fn setup_global_shortcuts(
     // Register the specific shortcut
     match app.global_shortcut().register(shortcut) {
         Ok(_) => {
-            println!("[STARTUP] ✓ Global shortcut registered successfully!");
-            println!("[STARTUP] Press '{}' to start/stop recording", hotkey);
-            println!("=======================================================");
+            log::info!("[STARTUP] ✓ Global shortcut registered successfully!");
+            log::info!("[STARTUP] Press '{}' to start/stop recording", hotkey);
+            log::info!("=======================================================");
         }
         Err(e) => {
-            eprintln!("[STARTUP] ✗ FAILED to register global shortcut!");
-            eprintln!("[STARTUP] Error: {}", e);
-            eprintln!("[STARTUP] This could be because:");
-            eprintln!("[STARTUP]   1. Another app is using this shortcut");
-            eprintln!("[STARTUP]   2. The shortcut is a system-reserved combination");
-            eprintln!("[STARTUP]   3. The app doesn't have proper permissions");
-            eprintln!("=======================================================");
+            log::error!("[STARTUP] ✗ FAILED to register global shortcut!");
+            log::error!("[STARTUP] Error: {}", e);
+            log::error!("[STARTUP] This could be because:");
+            log::error!("[STARTUP]   1. Another app is using this shortcut");
+            log::error!("[STARTUP]   2. The shortcut is a system-reserved combination");
+            log::error!("[STARTUP]   3. The app doesn't have proper permissions");
+            log::error!("=======================================================");
             return Err(e.into());
         }
     }
@@ -1697,24 +2001,62 @@ fn setup_global_shortcuts(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    println!("=======================================================");
-    println!("[STARTUP] Murmur starting...");
-    println!("=======================================================");
+    // Initialize Sentry for error monitoring (must be first)
+    let sentry_client = sentry::init((
+        "https://0342320e0cdcaa1b7737ac5ea69caad5@o4507499424186368.ingest.us.sentry.io/4510631808532480",
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            auto_session_tracking: true,
+            ..Default::default()
+        },
+    ));
+
+    // Initialize minidump crash handler (captures native crashes)
+    let _sentry_guard = tauri_plugin_sentry::minidump::init(&sentry_client);
+
+    log::info!("=======================================================");
+    log::info!("[STARTUP] Keyhold starting...");
+    log::info!(
+        "[STARTUP] Sentry initialized (release={})",
+        env!("CARGO_PKG_VERSION")
+    );
+    log::info!("=======================================================");
 
     let config = AppConfig::load();
     let initial_hotkey = config.hotkey.clone();
     let initial_mode = config.recording_mode.clone();
 
-    println!("[STARTUP] Configuration loaded:");
-    println!("[STARTUP]   Hotkey: '{}'", initial_hotkey);
-    println!("[STARTUP]   Mode: '{}'", initial_mode);
-    println!("[STARTUP]   Has Groq API key: {}", config.groq_api_key.is_some());
+    log::info!("[STARTUP] Configuration loaded:");
+    log::info!("[STARTUP]   Hotkey: '{}'", initial_hotkey);
+    log::info!("[STARTUP]   Mode: '{}'", initial_mode);
+    log::info!(
+        "[STARTUP]   Has Groq API key: {}",
+        config.groq_api_key.is_some()
+    );
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_sentry::init(&sentry_client))
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    // Log to file in ~/Library/Logs/com.keyhold.app/
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("keyhold".into()),
+                    }),
+                    // Also log to stdout in debug builds
+                    #[cfg(debug_assertions)]
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                ])
+                .max_file_size(5_000_000) // 5MB max per log file
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                .level(log::LevelFilter::Info)
+                .level_for("keyhold", log::LevelFilter::Debug)
+                .build(),
+        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Another instance tried to launch - bring existing app to focus
-            println!("Another instance attempted to start, bringing existing window to focus");
+            log::info!("Another instance attempted to start, bringing existing window to focus");
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -1723,6 +2065,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::new(config))
         .invoke_handler(tauri::generate_handler![
             get_recording_state,
@@ -1738,13 +2081,22 @@ pub fn run() {
             get_microphones,
             request_microphone_permission,
             open_accessibility_settings,
+            request_accessibility_permission,
             set_selected_microphone,
             is_onboarding_complete,
+            needs_reauthorization,
             complete_onboarding,
+            restart_app,
             // Workspace index commands
             set_workspace_root,
             get_workspace_status,
             clear_workspace_index,
+            // Authentication commands
+            get_auth_state,
+            start_auth,
+            logout,
+            get_user_info,
+            is_authenticated,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -1755,11 +2107,48 @@ pub fn run() {
             // Register global shortcut
             setup_global_shortcuts(app, &initial_hotkey, &initial_mode)?;
 
+            // Set up deep-link handler for OAuth callbacks
+            let app_handle = app.handle().clone();
+            app.listen("deep-link://new-url", move |event| {
+                let payload = event.payload();
+                log::info!("[AUTH] Received deep link payload: {}", payload);
+
+                // Parse the JSON array payload to extract the URL
+                // The payload comes as: ["keyhold://auth/callback?code=xxx&state=yyy"]
+                let url: Option<String> = serde_json::from_str::<Vec<String>>(payload)
+                    .ok()
+                    .and_then(|urls| urls.into_iter().next());
+
+                if let Some(url) = url {
+                    log::info!("[AUTH] Extracted URL: {}", url);
+                    if url.starts_with("keyhold://auth/callback") {
+                        let app = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            match auth::handle_callback(&app, &url).await {
+                                Ok(()) => log::info!("[AUTH] OAuth callback handled successfully"),
+                                Err(e) => {
+                                    log::error!("[AUTH] OAuth callback failed: {}", e);
+                                    sentry_capture_error(&format!("OAuth callback failed: {}", e), None);
+                                }
+                            }
+                        });
+                    }
+                } else {
+                    log::error!("[AUTH] Failed to parse deep link payload");
+                }
+            });
+
             // NOTE: Workspace auto-indexing disabled - use set_workspace_root command if needed.
 
-            // Hide main window on start
+            // Hide all windows initially
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.hide();
+            }
+            if let Some(onboarding) = app.get_webview_window("onboarding") {
+                let _ = onboarding.hide();
+            }
+            if let Some(login) = app.get_webview_window("login") {
+                let _ = login.hide();
             }
 
             // Pre-position overlay at bottom-center (while hidden)
@@ -1769,21 +2158,47 @@ pub fn run() {
                 let _ = overlay.hide();
             }
 
-            // Check if onboarding is needed
-            if !permissions::is_onboarding_complete() {
-                // Show onboarding window
-                if let Some(onboarding) = app.get_webview_window("onboarding") {
-                    let _ = onboarding.show();
-                    let _ = onboarding.set_focus();
-                    // Change activation policy to regular app during onboarding
+            // STEP 1: Check authentication first
+            let is_authenticated = auth::is_authenticated();
+
+            if !is_authenticated {
+                // Show login window - user must sign in first
+                log::info!("[STARTUP] User not authenticated, showing login window");
+                if let Some(login) = app.get_webview_window("login") {
+                    let _ = login.show();
+                    let _ = login.set_focus();
                     #[cfg(target_os = "macos")]
                     app.set_activation_policy(tauri::ActivationPolicy::Regular);
                 }
             } else {
-                // Hide onboarding window if it exists
-                if let Some(onboarding) = app.get_webview_window("onboarding") {
-                    let _ = onboarding.hide();
+                // STEP 2: Check if onboarding is needed OR if permissions have been revoked
+                // This handles the case where the app was rebuilt/reinstalled and
+                // macOS revoked accessibility permissions due to changed code signature
+                let needs_onboarding = !permissions::is_onboarding_complete();
+                let has_accessibility = permissions::check_accessibility_permission();
+
+                if needs_onboarding || !has_accessibility {
+                    // Show onboarding window to guide user through permission setup
+                    if let Some(onboarding) = app.get_webview_window("onboarding") {
+                        let _ = onboarding.show();
+                        let _ = onboarding.set_focus();
+                        // Change activation policy to regular app during onboarding
+                        #[cfg(target_os = "macos")]
+                        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+                        // Notify the onboarding window it can start checking permissions
+                        // Small delay to ensure window is fully ready
+                        let app_handle = app.handle().clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            let _ = app_handle.emit("start-onboarding", ());
+                        });
+                    }
+                    // Log why we're showing onboarding
+                    if !needs_onboarding && !has_accessibility {
+                        log::info!("[STARTUP] Accessibility permission revoked (likely due to app rebuild). Showing onboarding to re-grant.");
+                    }
                 }
+                // If authenticated and onboarding complete, app runs as menu bar accessory
             }
 
             Ok(())
@@ -1814,17 +2229,26 @@ mod tests {
 
         #[test]
         fn test_escape_applescript_string_quotes() {
-            assert_eq!(escape_applescript_string(r#"say "hello""#), r#"say \"hello\""#);
+            assert_eq!(
+                escape_applescript_string(r#"say "hello""#),
+                r#"say \"hello\""#
+            );
         }
 
         #[test]
         fn test_escape_applescript_string_backslash() {
-            assert_eq!(escape_applescript_string(r"path\to\file"), r"path\\to\\file");
+            assert_eq!(
+                escape_applescript_string(r"path\to\file"),
+                r"path\\to\\file"
+            );
         }
 
         #[test]
         fn test_escape_applescript_string_tabs() {
-            assert_eq!(escape_applescript_string("col1\tcol2"), r#"col1" & tab & "col2"#);
+            assert_eq!(
+                escape_applescript_string("col1\tcol2"),
+                r#"col1" & tab & "col2"#
+            );
         }
 
         #[test]

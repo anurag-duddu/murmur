@@ -82,7 +82,9 @@ impl ServiceRateState {
             let elapsed = now.duration_since(last);
             if elapsed < config.min_interval {
                 let wait = config.min_interval - elapsed;
-                return Err(RateLimitError::TooFast { wait_ms: wait.as_millis() as u64 });
+                return Err(RateLimitError::TooFast {
+                    wait_ms: wait.as_millis() as u64,
+                });
             }
         }
 
@@ -172,7 +174,10 @@ impl RateLimiter {
     /// Returns Ok(()) if allowed, Err(RateLimitError) if rate limited
     pub fn check(&self, service: Service) -> Result<(), RateLimitError> {
         let config = service.config();
-        let mut states = self.states.lock().map_err(|_| RateLimitError::TooFast { wait_ms: 100 })?;
+        let mut states = self
+            .states
+            .lock()
+            .map_err(|_| RateLimitError::TooFast { wait_ms: 100 })?;
 
         let state = states.entry(service).or_insert_with(ServiceRateState::new);
         state.check_and_record(&config)
@@ -267,7 +272,10 @@ mod tests {
         let err = RateLimitError::TooFast { wait_ms: 500 };
         assert!(err.to_string().contains("500ms"));
 
-        let err = RateLimitError::WindowExceeded { limit: 10, wait_ms: 1000 };
+        let err = RateLimitError::WindowExceeded {
+            limit: 10,
+            wait_ms: 1000,
+        };
         assert!(err.to_string().contains("10 requests"));
     }
 }

@@ -107,31 +107,31 @@ const IDE_BUNDLE_IDS: &[&str] = &[
 /// Keywords found in text input service bundle IDs that indicate an IDE.
 /// Example: "com.apple.TextInputUI.xpc.CursorUIViewService" contains "Cursor"
 const IDE_TEXT_INPUT_KEYWORDS: &[&str] = &[
-    "Cursor",     // Cursor editor
-    "VSCode",     // VS Code
-    "Code",       // VS Code variants
-    "Xcode",      // Xcode
-    "IntelliJ",   // JetBrains IntelliJ
-    "PyCharm",    // JetBrains PyCharm
-    "WebStorm",   // JetBrains WebStorm
-    "GoLand",     // JetBrains GoLand
-    "CLion",      // JetBrains CLion
-    "Rider",      // JetBrains Rider
-    "RubyMine",   // JetBrains RubyMine
-    "PhpStorm",   // JetBrains PhpStorm
-    "Android",    // Android Studio
-    "Sublime",    // Sublime Text
-    "Nova",       // Panic Nova
-    "BBEdit",     // BBEdit
-    "Emacs",      // Emacs
-    "Vim",        // Vim/MacVim/VimR
-    "Terminal",   // Terminal
-    "iTerm",      // iTerm2
-    "Warp",       // Warp terminal
-    "Hyper",      // Hyper terminal
-    "kitty",      // kitty terminal
-    "Alacritty",  // Alacritty terminal
-    "Windsurf",   // Codeium Windsurf
+    "Cursor",    // Cursor editor
+    "VSCode",    // VS Code
+    "Code",      // VS Code variants
+    "Xcode",     // Xcode
+    "IntelliJ",  // JetBrains IntelliJ
+    "PyCharm",   // JetBrains PyCharm
+    "WebStorm",  // JetBrains WebStorm
+    "GoLand",    // JetBrains GoLand
+    "CLion",     // JetBrains CLion
+    "Rider",     // JetBrains Rider
+    "RubyMine",  // JetBrains RubyMine
+    "PhpStorm",  // JetBrains PhpStorm
+    "Android",   // Android Studio
+    "Sublime",   // Sublime Text
+    "Nova",      // Panic Nova
+    "BBEdit",    // BBEdit
+    "Emacs",     // Emacs
+    "Vim",       // Vim/MacVim/VimR
+    "Terminal",  // Terminal
+    "iTerm",     // iTerm2
+    "Warp",      // Warp terminal
+    "Hyper",     // Hyper terminal
+    "kitty",     // kitty terminal
+    "Alacritty", // Alacritty terminal
+    "Windsurf",  // Codeium Windsurf
 ];
 
 /// Check if a bundle ID is a supported IDE/terminal.
@@ -193,7 +193,10 @@ pub fn apply_ide_transformations(
     workspace_index: Option<&file_index::WorkspaceIndex>,
 ) -> String {
     println!("[IDE] apply_ide_transformations called with: {:?}", text);
-    println!("[IDE] context.is_ide={}, bundle_id={}", context.is_ide, context.bundle_id);
+    println!(
+        "[IDE] context.is_ide={}, bundle_id={}",
+        context.is_ide, context.bundle_id
+    );
 
     // Only apply transformations if in an IDE
     if !context.is_ide {

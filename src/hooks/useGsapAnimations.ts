@@ -30,20 +30,6 @@ export const ANIMATION_PRESETS = {
     opacity: { from: 0, to: 1 },
     y: { from: 12, to: 0 },
   },
-  // Card selection pulse
-  cardSelect: {
-    duration: 0.3,
-    ease: "power2.out",
-    scale: [1, 1.02, 1],
-  },
-  // Stagger reveal for lists
-  staggerReveal: {
-    duration: 0.4,
-    ease: "power2.out",
-    stagger: 0.08,
-    opacity: { from: 0, to: 1 },
-    y: { from: 15, to: 0 },
-  },
 };
 
 /**
@@ -179,60 +165,6 @@ export function useTabTransition(activeTab: string) {
   }, [activeTab]);
 
   return contentRef;
-}
-
-/**
- * Hook for card selection animation
- */
-export function useCardSelectAnimation() {
-  const cardRef = useRef<HTMLButtonElement>(null);
-
-  const animateSelect = useCallback(() => {
-    if (!cardRef.current) return;
-
-    gsap.to(cardRef.current, {
-      keyframes: {
-        scale: ANIMATION_PRESETS.cardSelect.scale,
-      },
-      duration: ANIMATION_PRESETS.cardSelect.duration,
-      ease: ANIMATION_PRESETS.cardSelect.ease,
-    });
-  }, []);
-
-  return { cardRef, animateSelect };
-}
-
-/**
- * Hook for staggered list reveal
- */
-export function useStaggerReveal<T extends HTMLElement>() {
-  const containerRef = useRef<T>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const items = containerRef.current.children;
-    if (items.length === 0) return;
-
-    const { staggerReveal } = ANIMATION_PRESETS;
-
-    gsap.fromTo(
-      items,
-      {
-        opacity: staggerReveal.opacity.from,
-        y: staggerReveal.y.from,
-      },
-      {
-        opacity: staggerReveal.opacity.to,
-        y: staggerReveal.y.to,
-        duration: staggerReveal.duration,
-        ease: staggerReveal.ease,
-        stagger: staggerReveal.stagger,
-      }
-    );
-  }, []);
-
-  return containerRef;
 }
 
 /**

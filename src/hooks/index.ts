@@ -10,8 +10,6 @@ export {
   useOverlayAnimation,
   useRecordingPulse,
   useTabTransition,
-  useCardSelectAnimation,
-  useStaggerReveal,
   useWaveformAnimation,
   useEntranceAnimation,
   ANIMATION_PRESETS,

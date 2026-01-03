@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -11,9 +11,11 @@ import {
 } from "@/components/ui/select";
 import { LanguageChips } from "@/components/shared/LanguageChips";
 import { LanguageGrid } from "@/components/shared/LanguageGrid";
-import { ChevronDown, ChevronUp, Keyboard, Eye, Volume2, Globe, Languages } from "lucide-react";
+import { ChevronDown, ChevronUp, Keyboard, Eye, Volume2, Globe, Languages, User, LogOut } from "lucide-react";
 import type { Preferences } from "@/types";
 import { TRANSCRIPTION_LANGUAGES, HOTKEY_OPTIONS } from "@/types";
+import type { UserInfo } from "@/types/auth";
+import { tauriCommands } from "@/lib/tauri";
 
 interface GeneralTabProps {
   preferences: Preferences;
@@ -22,27 +24,99 @@ interface GeneralTabProps {
 
 export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
   const [showLanguageEditor, setShowLanguageEditor] = useState(false);
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  // Fetch user info on mount
+  useEffect(() => {
+    console.log("[GeneralTab] Fetching user info...");
+    tauriCommands.getUserInfo().then((userInfo) => {
+      console.log("[GeneralTab] Received user info:", userInfo);
+      setUser(userInfo);
+    }).catch((err) => {
+      console.error("[GeneralTab] Failed to get user info:", err);
+    });
+  }, []);
+
+  const handleSignOut = useCallback(async () => {
+    setIsSigningOut(true);
+    try {
+      await tauriCommands.logout();
+      // The backend will handle showing the login window
+    } catch (err) {
+      console.error("Failed to sign out:", err);
+      setIsSigningOut(false);
+    }
+  }, []);
 
   return (
     <div className="space-y-8">
+      {/* Account Section */}
+      {user && (
+        <section className="space-y-5">
+          <div className="flex items-center gap-2">
+            <User className="h-4 w-4 text-accent" />
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-white/50">Account</h2>
+          </div>
+
+          <div className="rounded-2xl glass-card p-4 sm:p-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {user.profile_picture_url ? (
+                  <img
+                    src={user.profile_picture_url}
+                    alt="Profile"
+                    className="h-10 w-10 rounded-full object-cover border border-white/10"
+                  />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/20 border border-accent/30">
+                    <User className="h-5 w-5 text-accent" />
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm font-medium text-white">
+                    {user.first_name && user.last_name
+                      ? `${user.first_name} ${user.last_name}`
+                      : user.email}
+                  </p>
+                  {user.first_name && user.last_name && (
+                    <p className="text-xs text-white/50">{user.email}</p>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSignOut}
+                disabled={isSigningOut}
+                className="gap-2 glass-input hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400"
+              >
+                <LogOut className="h-4 w-4" />
+                {isSigningOut ? "Signing out..." : "Sign Out"}
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Recording Controls Section */}
       <section className="space-y-5">
         <div className="flex items-center gap-2">
           <Keyboard className="h-4 w-4 text-accent" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Recording Controls</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-white/50">Recording Controls</h2>
         </div>
 
-        <div className="space-y-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 sm:p-5">
+        <div className="space-y-4 rounded-2xl glass-card p-4 sm:p-5">
           {/* Recording Mode */}
           <div className="space-y-2">
-            <Label htmlFor="recording-mode" className="text-sm font-medium">Recording Mode</Label>
+            <Label htmlFor="recording-mode" className="text-sm font-medium text-white">Recording Mode</Label>
             <Select
               value={preferences.recording_mode}
               onValueChange={(value) =>
                 onUpdate("recording_mode", value as "push-to-talk" | "toggle")
               }
             >
-              <SelectTrigger id="recording-mode" className="w-full bg-white/[0.03] border-white/[0.08] hover:bg-white/[0.05] transition-colors">
+              <SelectTrigger id="recording-mode" className="w-full glass-input">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -54,13 +128,13 @@ export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
 
           {/* Global Hotkey */}
           <div className="space-y-2">
-            <Label htmlFor="hotkey" className="text-sm font-medium">Global Hotkey</Label>
+            <Label htmlFor="hotkey" className="text-sm font-medium text-white">Global Hotkey</Label>
             <div className="flex gap-2">
               <Select
                 value={preferences.hotkey}
                 onValueChange={(value) => onUpdate("hotkey", value)}
               >
-                <SelectTrigger id="hotkey" className="flex-1 bg-white/[0.03] border-white/[0.08] hover:bg-white/[0.05] transition-colors">
+                <SelectTrigger id="hotkey" className="flex-1 glass-input">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -71,7 +145,7 @@ export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="default" className="shrink-0 bg-white/[0.03] border-white/[0.08] hover:bg-white/[0.06]">
+              <Button variant="outline" size="default" className="shrink-0 glass-input hover:bg-white/[0.08]">
                 Test
               </Button>
             </div>
@@ -83,20 +157,20 @@ export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
       <section className="space-y-5">
         <div className="flex items-center gap-2">
           <Eye className="h-4 w-4 text-accent" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Feedback</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-white/50">Feedback</h2>
         </div>
 
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] divide-y divide-white/[0.06]">
+        <div className="rounded-2xl glass-card divide-y divide-white/[0.08]">
           <div className="flex items-center justify-between p-4 sm:p-5">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.04]">
-                <Eye className="h-4 w-4 text-muted-foreground" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.06] border border-white/[0.08]">
+                <Eye className="h-4 w-4 text-white/60" />
               </div>
               <div>
-                <Label htmlFor="show-indicator" className="cursor-pointer text-sm font-medium">
+                <Label htmlFor="show-indicator" className="cursor-pointer text-sm font-medium text-white">
                   Visual Indicator
                 </Label>
-                <p className="text-xs text-muted-foreground mt-0.5">Show overlay when recording</p>
+                <p className="text-xs text-white/50 mt-0.5">Show overlay when recording</p>
               </div>
             </div>
             <Switch
@@ -107,14 +181,14 @@ export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
           </div>
           <div className="flex items-center justify-between p-4 sm:p-5">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.04]">
-                <Volume2 className="h-4 w-4 text-muted-foreground" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.06] border border-white/[0.08]">
+                <Volume2 className="h-4 w-4 text-white/60" />
               </div>
               <div>
-                <Label htmlFor="play-sounds" className="cursor-pointer text-sm font-medium">
+                <Label htmlFor="play-sounds" className="cursor-pointer text-sm font-medium text-white">
                   Sound Effects
                 </Label>
-                <p className="text-xs text-muted-foreground mt-0.5">Play audio feedback</p>
+                <p className="text-xs text-white/50 mt-0.5">Play audio feedback</p>
               </div>
             </div>
             <Switch
@@ -130,17 +204,17 @@ export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
       <section className="space-y-5">
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-accent" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Language</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-white/50">Language</h2>
         </div>
 
         {/* Transcription Language */}
-        <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 sm:p-5">
-          <Label htmlFor="language" className="text-sm font-medium">Transcription Language</Label>
+        <div className="space-y-3 rounded-2xl glass-card p-4 sm:p-5">
+          <Label htmlFor="language" className="text-sm font-medium text-white">Transcription Language</Label>
           <Select
             value={preferences.language}
             onValueChange={(value) => onUpdate("language", value)}
           >
-            <SelectTrigger id="language" className="w-full bg-white/[0.03] border-white/[0.08] hover:bg-white/[0.05] transition-colors">
+            <SelectTrigger id="language" className="w-full glass-input">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="max-h-[300px]">
@@ -151,24 +225,24 @@ export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
               ))}
             </SelectContent>
           </Select>
-          <div className="rounded-lg bg-white/[0.03] p-3 text-xs text-muted-foreground space-y-1">
-            <p><span className="text-foreground font-medium">Native mode:</span> Select a specific language for strict transcription.</p>
-            <p><span className="text-foreground font-medium">Mixed mode:</span> Auto-detects among your spoken languages.</p>
+          <div className="rounded-lg bg-white/[0.04] border border-white/[0.06] p-3 text-xs text-white/50 space-y-1">
+            <p><span className="text-white/80 font-medium">Native mode:</span> Select a specific language for strict transcription.</p>
+            <p><span className="text-white/80 font-medium">Mixed mode:</span> Auto-detects among your spoken languages.</p>
           </div>
         </div>
 
         {/* Spoken Languages */}
-        <div className="space-y-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 sm:p-5">
+        <div className="space-y-4 rounded-2xl glass-card p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Languages className="h-4 w-4 text-muted-foreground" />
-              <Label className="text-sm font-medium">Languages I Speak</Label>
+              <Languages className="h-4 w-4 text-white/60" />
+              <Label className="text-sm font-medium text-white">Languages I Speak</Label>
             </div>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowLanguageEditor(!showLanguageEditor)}
-              className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              className="h-8 gap-1.5 text-xs text-white/50 hover:text-white hover:bg-white/[0.06]"
             >
               {showLanguageEditor ? "Done" : "Edit"}
               {showLanguageEditor ? (
@@ -180,7 +254,7 @@ export function GeneralTab({ preferences, onUpdate }: GeneralTabProps) {
           </div>
           <LanguageChips languages={preferences.spoken_languages || ["en"]} />
           {showLanguageEditor && (
-            <div className="mt-2 pt-4 border-t border-white/[0.06] space-y-4">
+            <div className="mt-2 pt-4 border-t border-white/[0.08] space-y-4">
               <LanguageGrid
                 selected={preferences.spoken_languages || ["en"]}
                 onChange={(languages) => onUpdate("spoken_languages", languages)}

@@ -33,19 +33,17 @@ impl CaseStyle {
         }
 
         match self {
-            CaseStyle::CamelCase => {
-                words
-                    .iter()
-                    .enumerate()
-                    .map(|(i, w)| {
-                        if i == 0 {
-                            w.to_lowercase()
-                        } else {
-                            capitalize(w)
-                        }
-                    })
-                    .collect()
-            }
+            CaseStyle::CamelCase => words
+                .iter()
+                .enumerate()
+                .map(|(i, w)| {
+                    if i == 0 {
+                        w.to_lowercase()
+                    } else {
+                        capitalize(w)
+                    }
+                })
+                .collect(),
             CaseStyle::PascalCase => words.iter().map(|w| capitalize(w)).collect(),
             CaseStyle::SnakeCase => words
                 .iter()
@@ -71,7 +69,10 @@ fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         None => String::new(),
-        Some(c) => c.to_uppercase().chain(chars.map(|c| c.to_ascii_lowercase())).collect(),
+        Some(c) => c
+            .to_uppercase()
+            .chain(chars.map(|c| c.to_ascii_lowercase()))
+            .collect(),
     }
 }
 
@@ -146,9 +147,7 @@ pub fn apply_variable_patterns(text: &str, _default_style: CaseStyle) -> String 
 
     // Handle "underscore" between words → snake_case
     while UNDERSCORE_PATTERN.is_match(&result) {
-        result = UNDERSCORE_PATTERN
-            .replace(&result, "${1}_${2}")
-            .to_string();
+        result = UNDERSCORE_PATTERN.replace(&result, "${1}_${2}").to_string();
     }
 
     // Handle "dash" between words → kebab-case (only for variable context)
@@ -229,8 +228,10 @@ mod tests {
 
     #[test]
     fn test_multiple_underscores() {
-        let result =
-            apply_variable_patterns("user underscore first underscore name", CaseStyle::CamelCase);
+        let result = apply_variable_patterns(
+            "user underscore first underscore name",
+            CaseStyle::CamelCase,
+        );
         assert_eq!(result, "user_first_name");
     }
 

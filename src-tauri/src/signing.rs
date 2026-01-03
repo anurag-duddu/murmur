@@ -18,7 +18,9 @@ pub const PROXY_URL_WHISPER: &str = "https://murmur-proxy.anurag-ebc.workers.dev
 pub const PROXY_URL_CHAT: &str = "https://murmur-proxy.anurag-ebc.workers.dev/chat";
 
 /// Direct API URLs (for development with local API key)
+#[cfg(debug_assertions)]
 pub const DIRECT_API_URL_WHISPER: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
+#[cfg(debug_assertions)]
 pub const DIRECT_API_URL_CHAT: &str = "https://api.groq.com/openai/v1/chat/completions";
 
 /// Get API configuration based on build type.
@@ -98,11 +100,15 @@ pub fn sign_request(body: &[u8]) -> (String, String, String) {
     let message = format!("{}:{}:{}", timestamp_str, nonce, body_hash);
 
     // Compute HMAC signature
-    let mut mac = HmacSha256::new_from_slice(HMAC_SECRET.as_bytes())
-        .expect("HMAC can take key of any size");
+    let mut mac =
+        HmacSha256::new_from_slice(HMAC_SECRET.as_bytes()).expect("HMAC can take key of any size");
     mac.update(message.as_bytes());
     let result = mac.finalize();
-    let signature: String = result.into_bytes().iter().map(|b| format!("{:02x}", b)).collect();
+    let signature: String = result
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
 
     (timestamp_str, nonce, signature)
 }
@@ -131,7 +137,10 @@ mod tests {
     fn test_sha256_hex() {
         // Known SHA-256 hash of "hello"
         let hash = sha256_hex(b"hello");
-        assert_eq!(hash, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
     }
 
     #[test]

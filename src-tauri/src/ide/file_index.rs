@@ -14,19 +14,61 @@ const MAX_FILES: usize = 10_000;
 /// File extensions to include in the index.
 const INCLUDED_EXTENSIONS: &[&str] = &[
     // Web/Frontend
-    "ts", "tsx", "js", "jsx", "mjs", "cjs", "vue", "svelte",
-    "html", "css", "scss", "sass", "less",
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "mjs",
+    "cjs",
+    "vue",
+    "svelte",
+    "html",
+    "css",
+    "scss",
+    "sass",
+    "less",
     // Backend
-    "rs", "go", "py", "rb", "java", "kt", "scala", "php",
-    "c", "cpp", "cc", "h", "hpp", "cs", "swift", "m", "mm",
+    "rs",
+    "go",
+    "py",
+    "rb",
+    "java",
+    "kt",
+    "scala",
+    "php",
+    "c",
+    "cpp",
+    "cc",
+    "h",
+    "hpp",
+    "cs",
+    "swift",
+    "m",
+    "mm",
     // Config/Data
-    "json", "yaml", "yml", "toml", "xml", "ini", "env",
+    "json",
+    "yaml",
+    "yml",
+    "toml",
+    "xml",
+    "ini",
+    "env",
     // Documentation
-    "md", "mdx", "txt", "rst",
+    "md",
+    "mdx",
+    "txt",
+    "rst",
     // Shell/Scripts
-    "sh", "bash", "zsh", "fish", "ps1",
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "ps1",
     // Other
-    "sql", "graphql", "proto", "dockerfile",
+    "sql",
+    "graphql",
+    "proto",
+    "dockerfile",
 ];
 
 /// A file entry in the workspace index.
@@ -47,7 +89,10 @@ impl FileEntry {
     fn from_path(path: &Path, root: &Path) -> Option<Self> {
         let relative_path = path.strip_prefix(root).ok()?;
         let name = path.file_name()?.to_str()?.to_string();
-        let extension = path.extension().and_then(|e| e.to_str()).map(|s| s.to_string());
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_string());
 
         // Normalize: lowercase, no extension
         let name_normalized = path
@@ -99,7 +144,10 @@ impl WorkspaceIndex {
         }
 
         if !root.is_dir() {
-            return Err(format!("Workspace root is not a directory: {}", root.display()));
+            return Err(format!(
+                "Workspace root is not a directory: {}",
+                root.display()
+            ));
         }
 
         let mut files = Vec::new();

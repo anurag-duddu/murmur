@@ -40,14 +40,12 @@ static LITERAL_FILENAME_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Pattern for common file references: "the [name] file"
-static THE_FILE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bthe\s+(\w+)\s+file\b").unwrap()
-});
+static THE_FILE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bthe\s+(\w+)\s+file\b").unwrap());
 
 /// Pattern for explicit file reference: "file [name]"
-static FILE_PREFIX_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bfile\s+(\w+(?:\s+dot\s+\w+)?)\b").unwrap()
-});
+static FILE_PREFIX_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bfile\s+(\w+(?:\s+dot\s+\w+)?)\b").unwrap());
 
 /// Fuzzy matcher for filename matching.
 static FUZZY_MATCHER: LazyLock<SkimMatcherV2> = LazyLock::new(SkimMatcherV2::default);
@@ -150,9 +148,15 @@ fn apply_literal_filename_pattern(text: &str, index: &WorkspaceIndex) -> String 
             let prefix = captures.get(1).unwrap().as_str();
             let replacement = format!("{}@{}", prefix, filename);
             result = result.replacen(full_match, &replacement, 1);
-            println!("[FILE_TAGGER] Tagged verified file: {} -> @{}", filename, filename);
+            println!(
+                "[FILE_TAGGER] Tagged verified file: {} -> @{}",
+                filename, filename
+            );
         } else {
-            println!("[FILE_TAGGER] File '{}' not in workspace - not tagging", filename);
+            println!(
+                "[FILE_TAGGER] File '{}' not in workspace - not tagging",
+                filename
+            );
         }
     }
 
@@ -180,7 +184,10 @@ fn apply_dot_extension_pattern(text: &str, index: &WorkspaceIndex) -> String {
             replacements.push((full_match, replacement));
         } else {
             // No match found - leave the text unchanged, don't guess
-            println!("[FILE_TAGGER] No match for '{} dot {}' - leaving unchanged", words, extension);
+            println!(
+                "[FILE_TAGGER] No match for '{} dot {}' - leaving unchanged",
+                words, extension
+            );
         }
     }
 
@@ -270,7 +277,10 @@ fn normalize_spoken_filename(spoken: &str) -> String {
                 let mut chars = w.chars();
                 match chars.next() {
                     None => String::new(),
-                    Some(c) => c.to_uppercase().chain(chars.map(|c| c.to_ascii_lowercase())).collect(),
+                    Some(c) => c
+                        .to_uppercase()
+                        .chain(chars.map(|c| c.to_ascii_lowercase()))
+                        .collect(),
                 }
             }
         })
@@ -303,10 +313,7 @@ fn find_best_match<'a>(
     };
 
     // Exact match on normalized name
-    if let Some(file) = candidates
-        .iter()
-        .find(|f| f.name_normalized == name_lower)
-    {
+    if let Some(file) = candidates.iter().find(|f| f.name_normalized == name_lower) {
         return Some(file);
     }
 
@@ -441,7 +448,10 @@ mod tests {
 
         // nonexistent.ts does NOT exist in index - should NOT be tagged
         let result = apply_file_tagging("Open nonexistent.ts", Some(&index));
-        assert_eq!(result, "Open nonexistent.ts", "Non-existent file should not be tagged");
+        assert_eq!(
+            result, "Open nonexistent.ts",
+            "Non-existent file should not be tagged"
+        );
     }
 
     #[test]

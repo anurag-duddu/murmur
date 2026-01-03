@@ -1,3 +1,4 @@
+import "@/sentry"; // Initialize Sentry first
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { PreferencesWindow } from "@/components/preferences";

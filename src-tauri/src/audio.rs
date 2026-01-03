@@ -56,9 +56,13 @@ impl AudioRecorder {
 
         // Spawn audio capture thread
         std::thread::spawn(move || {
-            if let Err(e) =
-                Self::capture_audio(audio_data, is_recording, recent_samples, app_handle, device_name)
-            {
+            if let Err(e) = Self::capture_audio(
+                audio_data,
+                is_recording,
+                recent_samples,
+                app_handle,
+                device_name,
+            ) {
                 eprintln!("Audio capture error: {}", e);
             }
         });
@@ -107,7 +111,11 @@ impl AudioRecorder {
             .lock()
             .map_err(|e| format!("Failed to lock audio data: {}", e))?;
 
-        println!("Audio data samples: {} at {}Hz", audio_data.len(), self.sample_rate);
+        println!(
+            "Audio data samples: {} at {}Hz",
+            audio_data.len(),
+            self.sample_rate
+        );
 
         if audio_data.is_empty() {
             return Err("No audio data recorded".to_string());
@@ -137,8 +145,8 @@ impl AudioRecorder {
             input_rate,
             output_rate,
             chunk_size,
-            2,  // sub-chunks for quality
-            1,  // mono
+            2, // sub-chunks for quality
+            1, // mono
         )
         .map_err(|e| format!("Failed to create resampler: {}", e))?;
 
@@ -488,8 +496,16 @@ mod tests {
         // Maximum amplitude (all 1.0)
         let samples = vec![1.0; 1000];
         let (level, peak) = calculate_levels(&samples);
-        assert!((level - 1.0).abs() < 0.01, "Level should be near 1.0, got {}", level);
-        assert!((peak - 1.0).abs() < 0.01, "Peak should be near 1.0, got {}", peak);
+        assert!(
+            (level - 1.0).abs() < 0.01,
+            "Level should be near 1.0, got {}",
+            level
+        );
+        assert!(
+            (peak - 1.0).abs() < 0.01,
+            "Peak should be near 1.0, got {}",
+            peak
+        );
     }
 
     #[test]
@@ -497,21 +513,39 @@ mod tests {
         // Maximum negative amplitude (all -1.0)
         let samples = vec![-1.0; 1000];
         let (level, peak) = calculate_levels(&samples);
-        assert!((level - 1.0).abs() < 0.01, "Level should be near 1.0, got {}", level);
-        assert!((peak - 1.0).abs() < 0.01, "Peak should be near 1.0, got {}", peak);
+        assert!(
+            (level - 1.0).abs() < 0.01,
+            "Level should be near 1.0, got {}",
+            level
+        );
+        assert!(
+            (peak - 1.0).abs() < 0.01,
+            "Peak should be near 1.0, got {}",
+            peak
+        );
     }
 
     #[test]
     fn test_calculate_levels_mixed_amplitude() {
         // Alternating positive and negative samples
-        let samples: Vec<f32> = (0..1000).map(|i| if i % 2 == 0 { 0.5 } else { -0.5 }).collect();
+        let samples: Vec<f32> = (0..1000)
+            .map(|i| if i % 2 == 0 { 0.5 } else { -0.5 })
+            .collect();
         let (level, peak) = calculate_levels(&samples);
 
         // RMS should be around 0.5, peak should be 0.5
         // In dB: 20 * log10(0.5) ≈ -6 dB
         // Normalized: (-6 - (-60)) / 60 = 54/60 = 0.9
-        assert!(level > 0.8 && level < 1.0, "Level should be around 0.9, got {}", level);
-        assert!(peak > 0.8 && peak < 1.0, "Peak should be around 0.9, got {}", peak);
+        assert!(
+            level > 0.8 && level < 1.0,
+            "Level should be around 0.9, got {}",
+            level
+        );
+        assert!(
+            peak > 0.8 && peak < 1.0,
+            "Peak should be around 0.9, got {}",
+            peak
+        );
     }
 
     #[test]
@@ -520,14 +554,25 @@ mod tests {
         // 20 * log10(0.001) = -60 dB, which is the minimum
         let samples = vec![0.001; 1000];
         let (level, peak) = calculate_levels(&samples);
-        assert!(level >= 0.0 && level < 0.1, "Level should be near 0, got {}", level);
-        assert!(peak >= 0.0 && peak < 0.1, "Peak should be near 0, got {}", peak);
+        assert!(
+            level >= 0.0 && level < 0.1,
+            "Level should be near 0, got {}",
+            level
+        );
+        assert!(
+            peak >= 0.0 && peak < 0.1,
+            "Peak should be near 0, got {}",
+            peak
+        );
     }
 
     #[test]
     fn test_calculate_levels_single_sample() {
         let (level, peak) = calculate_levels(&[0.5]);
-        assert!(level > 0.0 && level < 1.0, "Level should be between 0 and 1");
+        assert!(
+            level > 0.0 && level < 1.0,
+            "Level should be between 0 and 1"
+        );
         assert!(peak > 0.0 && peak < 1.0, "Peak should be between 0 and 1");
     }
 
@@ -539,7 +584,11 @@ mod tests {
         let (level, peak) = calculate_levels(&samples);
 
         // Peak should detect the spike
-        assert!((peak - 1.0).abs() < 0.01, "Peak should detect the spike, got {}", peak);
+        assert!(
+            (peak - 1.0).abs() < 0.01,
+            "Peak should detect the spike, got {}",
+            peak
+        );
         // RMS level should be much lower than peak
         assert!(level < peak, "RMS should be lower than peak");
     }
@@ -547,14 +596,24 @@ mod tests {
     #[test]
     fn test_calculate_levels_returns_in_range() {
         // Test with random-ish values to ensure output is always in [0, 1]
-        let samples: Vec<f32> = (0..100).map(|i| {
-            let x = (i as f32 * 0.1).sin() * 0.8;
-            x
-        }).collect();
+        let samples: Vec<f32> = (0..100)
+            .map(|i| {
+                let x = (i as f32 * 0.1).sin() * 0.8;
+                x
+            })
+            .collect();
         let (level, peak) = calculate_levels(&samples);
 
-        assert!(level >= 0.0 && level <= 1.0, "Level must be in [0, 1], got {}", level);
-        assert!(peak >= 0.0 && peak <= 1.0, "Peak must be in [0, 1], got {}", peak);
+        assert!(
+            level >= 0.0 && level <= 1.0,
+            "Level must be in [0, 1], got {}",
+            level
+        );
+        assert!(
+            peak >= 0.0 && peak <= 1.0,
+            "Peak must be in [0, 1], got {}",
+            peak
+        );
     }
 
     #[test]
@@ -573,7 +632,9 @@ mod tests {
         let recorder = AudioRecorder::new();
         // Default sample rate should be 48000
         assert_eq!(recorder.sample_rate, 48000);
-        assert!(!recorder.is_recording.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!recorder
+            .is_recording
+            .load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]

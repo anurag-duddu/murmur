@@ -12,54 +12,46 @@ const DEFAULT_MAPPINGS: &[(&str, &str)] = &[
     // CASUAL - Messaging & Chat Apps
     // =========================================================================
     // Apple
-    ("com.apple.MobileSMS", "casual"),              // Messages
-    ("com.apple.iChat", "casual"),                  // iChat (legacy)
-
+    ("com.apple.MobileSMS", "casual"), // Messages
+    ("com.apple.iChat", "casual"),     // iChat (legacy)
     // Slack & Discord
-    ("com.tinyspeck.slackmacgap", "casual"),        // Slack
-    ("com.hnc.Discord", "casual"),                  // Discord
-
+    ("com.tinyspeck.slackmacgap", "casual"), // Slack
+    ("com.hnc.Discord", "casual"),           // Discord
     // Meta/Facebook
-    ("com.facebook.Messenger", "casual"),           // Messenger
-    ("net.whatsapp.WhatsApp", "casual"),            // WhatsApp
-    ("com.instagram.Instagram", "casual"),          // Instagram
-
+    ("com.facebook.Messenger", "casual"),  // Messenger
+    ("net.whatsapp.WhatsApp", "casual"),   // WhatsApp
+    ("com.instagram.Instagram", "casual"), // Instagram
     // Telegram
-    ("org.telegram.desktop", "casual"),             // Telegram
-    ("ru.keepcoder.Telegram", "casual"),            // Telegram (alternative)
-
+    ("org.telegram.desktop", "casual"),  // Telegram
+    ("ru.keepcoder.Telegram", "casual"), // Telegram (alternative)
     // Other Messaging
-    ("com.viber.osx", "casual"),                    // Viber
-    ("jp.naver.line.mac", "casual"),                // LINE
-    ("com.wechat.WeChat", "casual"),                // WeChat
-    ("org.pqrs.Signal", "casual"),                  // Signal (variant)
+    ("com.viber.osx", "casual"),                     // Viber
+    ("jp.naver.line.mac", "casual"),                 // LINE
+    ("com.wechat.WeChat", "casual"),                 // WeChat
+    ("org.pqrs.Signal", "casual"),                   // Signal (variant)
     ("org.whispersystems.signal-desktop", "casual"), // Signal
-    ("com.skype.skype", "casual"),                  // Skype (personal)
-    ("im.riot.app", "casual"),                      // Element/Matrix
-    ("com.wire.Wire", "casual"),                    // Wire
-    ("com.threema.threema", "casual"),              // Threema
-    ("com.keybase.Keybase", "casual"),              // Keybase
-
+    ("com.skype.skype", "casual"),                   // Skype (personal)
+    ("im.riot.app", "casual"),                       // Element/Matrix
+    ("com.wire.Wire", "casual"),                     // Wire
+    ("com.threema.threema", "casual"),               // Threema
+    ("com.keybase.Keybase", "casual"),               // Keybase
     // Video Conferencing (Casual context - chat/messaging in these apps)
-    ("us.zoom.xos", "casual"),                      // Zoom
-    ("com.microsoft.teams", "casual"),              // Microsoft Teams
-    ("com.microsoft.teams2", "casual"),             // Microsoft Teams (new)
-    ("com.google.meet", "casual"),                  // Google Meet
-    ("com.cisco.webex", "casual"),                  // Webex
-    ("com.cisco.webexmeetings", "casual"),          // Webex Meetings
-    ("com.logmein.GoToMeeting", "casual"),          // GoToMeeting
-    ("com.loom.desktop", "casual"),                 // Loom
-    ("com.around.Around", "casual"),                // Around
-
+    ("us.zoom.xos", "casual"),             // Zoom
+    ("com.microsoft.teams", "casual"),     // Microsoft Teams
+    ("com.microsoft.teams2", "casual"),    // Microsoft Teams (new)
+    ("com.google.meet", "casual"),         // Google Meet
+    ("com.cisco.webex", "casual"),         // Webex
+    ("com.cisco.webexmeetings", "casual"), // Webex Meetings
+    ("com.logmein.GoToMeeting", "casual"), // GoToMeeting
+    ("com.loom.desktop", "casual"),        // Loom
+    ("com.around.Around", "casual"),       // Around
     // =========================================================================
     // PROFESSIONAL - Email & Business Communication
     // =========================================================================
     // Apple
-    ("com.apple.mail", "professional"),             // Apple Mail
-
+    ("com.apple.mail", "professional"), // Apple Mail
     // Microsoft
-    ("com.microsoft.Outlook", "professional"),      // Outlook
-
+    ("com.microsoft.Outlook", "professional"), // Outlook
     // Third-party Email
     ("com.readdle.smartemail-Mac", "professional"), // Spark
     ("com.superhuman.Superhuman", "professional"),  // Superhuman
@@ -72,30 +64,27 @@ const DEFAULT_MAPPINGS: &[(&str, &str)] = &[
     ("com.newton.Newton", "professional"),          // Newton Mail
     ("me.protonmail.ProtonMail", "professional"),   // ProtonMail
     ("io.tutanota.tutanota", "professional"),       // Tutanota
-
     // Business/Professional Apps
-    ("com.linkedin.LinkedIn", "professional"),      // LinkedIn
+    ("com.linkedin.LinkedIn", "professional"), // LinkedIn
     ("com.linkedin.linkedin-sales-navigator-osx", "professional"), // LinkedIn Sales Navigator
-    ("com.salesforce.salesforce", "professional"),  // Salesforce
-    ("com.hubspot.HubSpot", "professional"),        // HubSpot
-
+    ("com.salesforce.salesforce", "professional"), // Salesforce
+    ("com.hubspot.HubSpot", "professional"),   // HubSpot
     // =========================================================================
     // TECHNICAL - Development & Engineering
     // =========================================================================
     // Terminals
-    ("com.apple.Terminal", "technical"),            // Terminal
-    ("com.googlecode.iterm2", "technical"),         // iTerm2
-    ("dev.warp.Warp-Stable", "technical"),          // Warp
-    ("co.zeit.hyper", "technical"),                 // Hyper
-    ("net.kovidgoyal.kitty", "technical"),          // kitty
-    ("io.alacritty", "technical"),                  // Alacritty
-    ("com.tabby.Tabby", "technical"),               // Tabby
-    ("com.panic.Prompt", "technical"),              // Prompt
-    ("com.panic.Prompt3", "technical"),             // Prompt 3
-    ("org.gnu.Emacs", "technical"),                 // Emacs
-    ("org.vim.MacVim", "technical"),                // MacVim
-    ("com.qvacua.VimR", "technical"),               // VimR
-
+    ("com.apple.Terminal", "technical"),    // Terminal
+    ("com.googlecode.iterm2", "technical"), // iTerm2
+    ("dev.warp.Warp-Stable", "technical"),  // Warp
+    ("co.zeit.hyper", "technical"),         // Hyper
+    ("net.kovidgoyal.kitty", "technical"),  // kitty
+    ("io.alacritty", "technical"),          // Alacritty
+    ("com.tabby.Tabby", "technical"),       // Tabby
+    ("com.panic.Prompt", "technical"),      // Prompt
+    ("com.panic.Prompt3", "technical"),     // Prompt 3
+    ("org.gnu.Emacs", "technical"),         // Emacs
+    ("org.vim.MacVim", "technical"),        // MacVim
+    ("com.qvacua.VimR", "technical"),       // VimR
     // Code Editors
     ("com.microsoft.VSCode", "technical"),          // VS Code
     ("com.microsoft.VSCodeInsiders", "technical"),  // VS Code Insiders
@@ -110,175 +99,158 @@ const DEFAULT_MAPPINGS: &[(&str, &str)] = &[
     ("com.github.atom", "technical"),               // Atom (legacy)
     ("org.eclipse.eclipse", "technical"),           // Eclipse
     ("com.neovide.neovide", "technical"),           // Neovide
-
     // IDEs - Apple
-    ("com.apple.dt.Xcode", "technical"),            // Xcode
-    ("com.apple.Playgrounds", "technical"),         // Swift Playgrounds
-
+    ("com.apple.dt.Xcode", "technical"),    // Xcode
+    ("com.apple.Playgrounds", "technical"), // Swift Playgrounds
     // IDEs - JetBrains
-    ("com.jetbrains.intellij", "technical"),        // IntelliJ IDEA
-    ("com.jetbrains.intellij.ce", "technical"),     // IntelliJ IDEA CE
-    ("com.jetbrains.pycharm", "technical"),         // PyCharm
-    ("com.jetbrains.pycharm.ce", "technical"),      // PyCharm CE
-    ("com.jetbrains.WebStorm", "technical"),        // WebStorm
-    ("com.jetbrains.PhpStorm", "technical"),        // PhpStorm
-    ("com.jetbrains.CLion", "technical"),           // CLion
-    ("com.jetbrains.GoLand", "technical"),          // GoLand
-    ("com.jetbrains.RubyMine", "technical"),        // RubyMine
-    ("com.jetbrains.rider", "technical"),           // Rider
-    ("com.jetbrains.AppCode", "technical"),         // AppCode
-    ("com.jetbrains.datagrip", "technical"),        // DataGrip
-    ("com.jetbrains.fleet", "technical"),           // Fleet
-
+    ("com.jetbrains.intellij", "technical"), // IntelliJ IDEA
+    ("com.jetbrains.intellij.ce", "technical"), // IntelliJ IDEA CE
+    ("com.jetbrains.pycharm", "technical"),  // PyCharm
+    ("com.jetbrains.pycharm.ce", "technical"), // PyCharm CE
+    ("com.jetbrains.WebStorm", "technical"), // WebStorm
+    ("com.jetbrains.PhpStorm", "technical"), // PhpStorm
+    ("com.jetbrains.CLion", "technical"),    // CLion
+    ("com.jetbrains.GoLand", "technical"),   // GoLand
+    ("com.jetbrains.RubyMine", "technical"), // RubyMine
+    ("com.jetbrains.rider", "technical"),    // Rider
+    ("com.jetbrains.AppCode", "technical"),  // AppCode
+    ("com.jetbrains.datagrip", "technical"), // DataGrip
+    ("com.jetbrains.fleet", "technical"),    // Fleet
     // IDEs - Other
-    ("com.google.android.studio", "technical"),     // Android Studio
-    ("com.visualstudio.code.oss", "technical"),     // VSCodium
-
+    ("com.google.android.studio", "technical"), // Android Studio
+    ("com.visualstudio.code.oss", "technical"), // VSCodium
     // Database & API Tools
-    ("com.sequelpro.SequelPro", "technical"),       // Sequel Pro
-    ("com.tinyapp.TablePlus", "technical"),         // TablePlus
-    ("com.dbeaver.product", "technical"),           // DBeaver
-    ("com.insomnia.Insomnia", "technical"),         // Insomnia
-    ("com.postmanlabs.Postman", "technical"),       // Postman
-    ("com.paw.Paw", "technical"),                   // Paw/RapidAPI
-    ("com.apple.CoreData.lab", "technical"),        // Core Data Lab
-    ("com.mongodb.compass", "technical"),           // MongoDB Compass
-    ("com.redis.RedisInsight", "technical"),        // Redis Insight
-
+    ("com.sequelpro.SequelPro", "technical"), // Sequel Pro
+    ("com.tinyapp.TablePlus", "technical"),   // TablePlus
+    ("com.dbeaver.product", "technical"),     // DBeaver
+    ("com.insomnia.Insomnia", "technical"),   // Insomnia
+    ("com.postmanlabs.Postman", "technical"), // Postman
+    ("com.paw.Paw", "technical"),             // Paw/RapidAPI
+    ("com.apple.CoreData.lab", "technical"),  // Core Data Lab
+    ("com.mongodb.compass", "technical"),     // MongoDB Compass
+    ("com.redis.RedisInsight", "technical"),  // Redis Insight
     // DevOps & Infrastructure
-    ("com.docker.docker", "technical"),             // Docker Desktop
-    ("com.electron.fork", "technical"),             // Fork (Git)
-    ("com.git.Tower", "technical"),                 // Tower
-    ("com.sourcetreeapp.SourceTree", "technical"),  // SourceTree
-    ("com.github.GitHubDesktop", "technical"),      // GitHub Desktop
+    ("com.docker.docker", "technical"), // Docker Desktop
+    ("com.electron.fork", "technical"), // Fork (Git)
+    ("com.git.Tower", "technical"),     // Tower
+    ("com.sourcetreeapp.SourceTree", "technical"), // SourceTree
+    ("com.github.GitHubDesktop", "technical"), // GitHub Desktop
     ("com.sublimemerge.Sublime-Merge", "technical"), // Sublime Merge
-    ("com.gitkraken.gitkraken", "technical"),       // GitKraken
+    ("com.gitkraken.gitkraken", "technical"), // GitKraken
     // Note: Typora is already listed above at line 109
     ("io.podman-desktop.PodmanDesktop", "technical"), // Podman Desktop
-
     // Generic Electron (fallback)
-    ("com.github.Electron", "technical"),           // Electron apps
-
+    ("com.github.Electron", "technical"), // Electron apps
     // =========================================================================
     // NEUTRAL - Notes, Browsers & General Purpose
     // =========================================================================
     // Apple Notes & TextEdit
-    ("com.apple.Notes", "neutral"),                 // Apple Notes
-    ("com.apple.TextEdit", "neutral"),              // TextEdit
-    ("com.apple.Preview", "neutral"),               // Preview
-    ("com.apple.finder", "neutral"),                // Finder
-
+    ("com.apple.Notes", "neutral"),    // Apple Notes
+    ("com.apple.TextEdit", "neutral"), // TextEdit
+    ("com.apple.Preview", "neutral"),  // Preview
+    ("com.apple.finder", "neutral"),   // Finder
     // Note-Taking Apps
-    ("notion.id", "neutral"),                       // Notion
-    ("md.obsidian", "neutral"),                     // Obsidian
-    ("com.evernote.Evernote", "neutral"),           // Evernote
-    ("com.couchbase.cblite.mindnode", "neutral"),   // MindNode
-    ("com.toketaware.mindnodepro", "neutral"),      // MindNode Pro
-    ("com.craft.craft", "neutral"),                 // Craft
-    ("com.lukilabs.lukiapp", "neutral"),            // Luki
-    ("com.agenda.Agenda", "neutral"),               // Agenda
-    ("com.apple.reminders", "neutral"),             // Reminders
-    ("com.goodlinks.GoodLinks", "neutral"),         // GoodLinks
-    ("com.raywenderlich.roost", "neutral"),         // Roost
-
+    ("notion.id", "neutral"),                     // Notion
+    ("md.obsidian", "neutral"),                   // Obsidian
+    ("com.evernote.Evernote", "neutral"),         // Evernote
+    ("com.couchbase.cblite.mindnode", "neutral"), // MindNode
+    ("com.toketaware.mindnodepro", "neutral"),    // MindNode Pro
+    ("com.craft.craft", "neutral"),               // Craft
+    ("com.lukilabs.lukiapp", "neutral"),          // Luki
+    ("com.agenda.Agenda", "neutral"),             // Agenda
+    ("com.apple.reminders", "neutral"),           // Reminders
+    ("com.goodlinks.GoodLinks", "neutral"),       // GoodLinks
+    ("com.raywenderlich.roost", "neutral"),       // Roost
     // Browsers (neutral - can't detect web app context)
-    ("com.google.Chrome", "neutral"),               // Chrome
-    ("com.google.Chrome.canary", "neutral"),        // Chrome Canary
-    ("com.apple.Safari", "neutral"),                // Safari
-    ("org.mozilla.firefox", "neutral"),             // Firefox
+    ("com.google.Chrome", "neutral"),                   // Chrome
+    ("com.google.Chrome.canary", "neutral"),            // Chrome Canary
+    ("com.apple.Safari", "neutral"),                    // Safari
+    ("org.mozilla.firefox", "neutral"),                 // Firefox
     ("org.mozilla.firefoxdeveloperedition", "neutral"), // Firefox Developer
-    ("company.thebrowser.Browser", "neutral"),      // Arc
-    ("com.microsoft.edgemac", "neutral"),           // Edge
-    ("com.brave.Browser", "neutral"),               // Brave
-    ("com.vivaldi.Vivaldi", "neutral"),             // Vivaldi
-    ("com.operasoftware.Opera", "neutral"),         // Opera
-    ("org.chromium.Chromium", "neutral"),           // Chromium
-    ("com.sigmaos.sigmaos", "neutral"),             // SigmaOS
-
+    ("company.thebrowser.Browser", "neutral"),          // Arc
+    ("com.microsoft.edgemac", "neutral"),               // Edge
+    ("com.brave.Browser", "neutral"),                   // Brave
+    ("com.vivaldi.Vivaldi", "neutral"),                 // Vivaldi
+    ("com.operasoftware.Opera", "neutral"),             // Opera
+    ("org.chromium.Chromium", "neutral"),               // Chromium
+    ("com.sigmaos.sigmaos", "neutral"),                 // SigmaOS
     // Productivity & Project Management
-    ("com.asana.asana", "neutral"),                 // Asana
-    ("com.trello.Trello", "neutral"),               // Trello
-    ("com.monday.monday", "neutral"),               // Monday.com
-    ("com.todoist.mac.Todoist", "neutral"),         // Todoist
-    ("com.omnigroup.OmniFocus3", "neutral"),        // OmniFocus
-    ("com.culturedcode.ThingsMac3", "neutral"),     // Things 3
-    ("com.ticktick.task.mac", "neutral"),           // TickTick
-    ("com.wunderbucket.WunderlistMac", "neutral"),  // Wunderlist (legacy)
-    ("com.apple.freeform", "neutral"),              // Freeform
-    ("com.miro.Miro", "neutral"),                   // Miro
-    ("com.fibery.Fibery", "neutral"),               // Fibery
-    ("com.airtableapp.Airtable", "neutral"),        // Airtable
-    ("com.coda.coda", "neutral"),                   // Coda
-    ("com.clickup.desktop-app", "neutral"),         // ClickUp
-
+    ("com.asana.asana", "neutral"),                // Asana
+    ("com.trello.Trello", "neutral"),              // Trello
+    ("com.monday.monday", "neutral"),              // Monday.com
+    ("com.todoist.mac.Todoist", "neutral"),        // Todoist
+    ("com.omnigroup.OmniFocus3", "neutral"),       // OmniFocus
+    ("com.culturedcode.ThingsMac3", "neutral"),    // Things 3
+    ("com.ticktick.task.mac", "neutral"),          // TickTick
+    ("com.wunderbucket.WunderlistMac", "neutral"), // Wunderlist (legacy)
+    ("com.apple.freeform", "neutral"),             // Freeform
+    ("com.miro.Miro", "neutral"),                  // Miro
+    ("com.fibery.Fibery", "neutral"),              // Fibery
+    ("com.airtableapp.Airtable", "neutral"),       // Airtable
+    ("com.coda.coda", "neutral"),                  // Coda
+    ("com.clickup.desktop-app", "neutral"),        // ClickUp
     // Spreadsheets & Data
-    ("com.microsoft.Excel", "neutral"),             // Excel
-    ("com.apple.iWork.Numbers", "neutral"),         // Numbers
-    ("com.google.sheets", "neutral"),               // Google Sheets (app)
-
+    ("com.microsoft.Excel", "neutral"),     // Excel
+    ("com.apple.iWork.Numbers", "neutral"), // Numbers
+    ("com.google.sheets", "neutral"),       // Google Sheets (app)
     // Presentations (Neutral for notes/general use)
-    ("com.microsoft.PowerPoint", "neutral"),        // PowerPoint
-    ("com.apple.iWork.Keynote", "neutral"),         // Keynote
-
+    ("com.microsoft.PowerPoint", "neutral"), // PowerPoint
+    ("com.apple.iWork.Keynote", "neutral"),  // Keynote
     // Microsoft Office Suite (misc)
-    ("com.microsoft.OneNote", "neutral"),           // OneNote
-    ("com.microsoft.onenote.mac", "neutral"),       // OneNote (alternative)
-    ("com.microsoft.To-Do", "neutral"),             // Microsoft To Do
-
+    ("com.microsoft.OneNote", "neutral"),     // OneNote
+    ("com.microsoft.onenote.mac", "neutral"), // OneNote (alternative)
+    ("com.microsoft.To-Do", "neutral"),       // Microsoft To Do
     // =========================================================================
     // CREATIVE - Writing & Design
     // =========================================================================
     // Word Processors
-    ("com.apple.iWork.Pages", "creative"),          // Pages
-    ("com.microsoft.Word", "creative"),             // Word
-    ("com.google.android.apps.docs", "creative"),   // Google Docs (app)
-    ("org.libreoffice.libreoffice", "creative"),    // LibreOffice
-    ("org.openoffice.calc", "creative"),            // OpenOffice
-
+    ("com.apple.iWork.Pages", "creative"),        // Pages
+    ("com.microsoft.Word", "creative"),           // Word
+    ("com.google.android.apps.docs", "creative"), // Google Docs (app)
+    ("org.libreoffice.libreoffice", "creative"),  // LibreOffice
+    ("org.openoffice.calc", "creative"),          // OpenOffice
     // Writing Apps
-    ("com.ulyssesapp.mac", "creative"),             // Ulysses
-    ("com.shinyfrog.bear", "creative"),             // Bear
-    ("pro.writer.mac", "creative"),                 // iA Writer
-    ("com.iawriter.mac", "creative"),               // iA Writer (alternative)
+    ("com.ulyssesapp.mac", "creative"),                // Ulysses
+    ("com.shinyfrog.bear", "creative"),                // Bear
+    ("pro.writer.mac", "creative"),                    // iA Writer
+    ("com.iawriter.mac", "creative"),                  // iA Writer (alternative)
     ("com.literatureandlatte.scrivener3", "creative"), // Scrivener
-    ("com.bloombuilt.dayone-mac", "creative"),      // Day One
-    ("com.bywordapp.Byword", "creative"),           // Byword
-    ("com.red-sweater.marsedit4", "creative"),      // MarsEdit
-    ("com.drafts.Drafts", "creative"),              // Drafts
-    ("com.agiletortoise.Drafts", "creative"),       // Drafts (alternative)
-    ("com.omnigroup.OmniOutliner5", "creative"),    // OmniOutliner
-    ("com.apple.garageband", "creative"),           // GarageBand
-
+    ("com.bloombuilt.dayone-mac", "creative"),         // Day One
+    ("com.bywordapp.Byword", "creative"),              // Byword
+    ("com.red-sweater.marsedit4", "creative"),         // MarsEdit
+    ("com.drafts.Drafts", "creative"),                 // Drafts
+    ("com.agiletortoise.Drafts", "creative"),          // Drafts (alternative)
+    ("com.omnigroup.OmniOutliner5", "creative"),       // OmniOutliner
+    ("com.apple.garageband", "creative"),              // GarageBand
     // Design Tools
-    ("com.figma.Desktop", "creative"),              // Figma
-    ("com.bohemiancoding.sketch3", "creative"),     // Sketch
-    ("com.adobe.illustrator", "creative"),          // Illustrator
-    ("com.adobe.Photoshop", "creative"),            // Photoshop
-    ("com.adobe.InDesign", "creative"),             // InDesign
-    ("com.adobe.AfterEffects", "creative"),         // After Effects
-    ("com.adobe.Premiere", "creative"),             // Premiere Pro
-    ("com.adobe.xd", "creative"),                   // Adobe XD
-    ("com.adobe.Lightroom", "creative"),            // Lightroom
-    ("com.adobe.LightroomClassic", "creative"),     // Lightroom Classic
-    ("com.affinity.designer", "creative"),          // Affinity Designer
-    ("com.affinity.photo", "creative"),             // Affinity Photo
-    ("com.affinity.publisher", "creative"),         // Affinity Publisher
-    ("com.pixelmator.Pixelmator-Pro", "creative"),  // Pixelmator Pro
-    ("com.canva.CanvaDesktop", "creative"),         // Canva
-    ("com.icons8.Lunacy", "creative"),              // Lunacy
-    ("com.invisionapp.studio", "creative"),         // InVision Studio
-    ("com.principle.Principle", "creative"),        // Principle
-    ("com.framer.Framer", "creative"),              // Framer
-    ("io.penpot.desktop", "creative"),              // Penpot
-
+    ("com.figma.Desktop", "creative"),             // Figma
+    ("com.bohemiancoding.sketch3", "creative"),    // Sketch
+    ("com.adobe.illustrator", "creative"),         // Illustrator
+    ("com.adobe.Photoshop", "creative"),           // Photoshop
+    ("com.adobe.InDesign", "creative"),            // InDesign
+    ("com.adobe.AfterEffects", "creative"),        // After Effects
+    ("com.adobe.Premiere", "creative"),            // Premiere Pro
+    ("com.adobe.xd", "creative"),                  // Adobe XD
+    ("com.adobe.Lightroom", "creative"),           // Lightroom
+    ("com.adobe.LightroomClassic", "creative"),    // Lightroom Classic
+    ("com.affinity.designer", "creative"),         // Affinity Designer
+    ("com.affinity.photo", "creative"),            // Affinity Photo
+    ("com.affinity.publisher", "creative"),        // Affinity Publisher
+    ("com.pixelmator.Pixelmator-Pro", "creative"), // Pixelmator Pro
+    ("com.canva.CanvaDesktop", "creative"),        // Canva
+    ("com.icons8.Lunacy", "creative"),             // Lunacy
+    ("com.invisionapp.studio", "creative"),        // InVision Studio
+    ("com.principle.Principle", "creative"),       // Principle
+    ("com.framer.Framer", "creative"),             // Framer
+    ("io.penpot.desktop", "creative"),             // Penpot
     // Video & Audio
-    ("com.apple.FinalCut", "creative"),             // Final Cut Pro
-    ("com.apple.iMovieApp", "creative"),            // iMovie
-    ("com.apple.Logic", "creative"),                // Logic Pro
+    ("com.apple.FinalCut", "creative"),  // Final Cut Pro
+    ("com.apple.iMovieApp", "creative"), // iMovie
+    ("com.apple.Logic", "creative"),     // Logic Pro
     ("com.blackmagic-design.DaVinciResolve", "creative"), // DaVinci Resolve
-    ("com.screenflow.ScreenFlow", "creative"),      // ScreenFlow
-    ("com.techsmith.camtasia3", "creative"),        // Camtasia
-    ("com.audacity.Audacity", "creative"),          // Audacity
+    ("com.screenflow.ScreenFlow", "creative"), // ScreenFlow
+    ("com.techsmith.camtasia3", "creative"), // Camtasia
+    ("com.audacity.Audacity", "creative"), // Audacity
 ];
 
 /// Get the appropriate style for an application.
@@ -327,72 +299,225 @@ fn get_style_id_for_bundle_id(bundle_id: &str) -> Option<&'static str> {
 /// Messaging/Chat keywords → casual
 const CASUAL_KEYWORDS: &[&str] = &[
     // Messaging
-    "chat", "messenger", "message", "messaging", "msg",
-    "slack", "discord", "telegram", "whatsapp", "signal",
-    "viber", "wechat", "line", "imessage", "sms",
+    "chat",
+    "messenger",
+    "message",
+    "messaging",
+    "msg",
+    "slack",
+    "discord",
+    "telegram",
+    "whatsapp",
+    "signal",
+    "viber",
+    "wechat",
+    "line",
+    "imessage",
+    "sms",
     // Social
-    "social", "twitter", "mastodon", "bluesky", "threads",
+    "social",
+    "twitter",
+    "mastodon",
+    "bluesky",
+    "threads",
     // Video chat (casual context)
-    "zoom", "meet", "facetime", "webex", "teams",
+    "zoom",
+    "meet",
+    "facetime",
+    "webex",
+    "teams",
     // Gaming/Community
-    "gaming", "community", "guild",
+    "gaming",
+    "community",
+    "guild",
 ];
 
 /// Email/Business keywords → professional
 const PROFESSIONAL_KEYWORDS: &[&str] = &[
     // Email
-    "mail", "email", "outlook", "inbox", "smtp", "imap",
-    "postbox", "airmail", "spark", "superhuman",
+    "mail",
+    "email",
+    "outlook",
+    "inbox",
+    "smtp",
+    "imap",
+    "postbox",
+    "airmail",
+    "spark",
+    "superhuman",
     // CRM/Sales
-    "salesforce", "hubspot", "crm", "sales", "linkedin",
-    "recruiter", "hiring", "hr", "talent",
+    "salesforce",
+    "hubspot",
+    "crm",
+    "sales",
+    "linkedin",
+    "recruiter",
+    "hiring",
+    "hr",
+    "talent",
     // Enterprise
-    "enterprise", "corporate", "business", "invoice",
-    "payroll", "accounting", "quickbooks", "freshbooks",
+    "enterprise",
+    "corporate",
+    "business",
+    "invoice",
+    "payroll",
+    "accounting",
+    "quickbooks",
+    "freshbooks",
 ];
 
 /// Development/Technical keywords → technical
 const TECHNICAL_KEYWORDS: &[&str] = &[
     // Terminals
-    "terminal", "term", "console", "shell", "bash", "zsh",
-    "iterm", "hyper", "warp", "alacritty", "kitty",
+    "terminal",
+    "term",
+    "console",
+    "shell",
+    "bash",
+    "zsh",
+    "iterm",
+    "hyper",
+    "warp",
+    "alacritty",
+    "kitty",
     // Editors/IDEs
-    "code", "editor", "ide", "studio", "vim", "emacs", "neovim",
-    "vscode", "xcode", "intellij", "pycharm", "webstorm",
-    "sublime", "atom", "nova", "bbedit", "cursor", "windsurf",
+    "code",
+    "editor",
+    "ide",
+    "studio",
+    "vim",
+    "emacs",
+    "neovim",
+    "vscode",
+    "xcode",
+    "intellij",
+    "pycharm",
+    "webstorm",
+    "sublime",
+    "atom",
+    "nova",
+    "bbedit",
+    "cursor",
+    "windsurf",
     // Development
-    "dev", "developer", "develop", "debug", "debugger",
-    "compiler", "build", "make", "cmake", "gradle",
+    "dev",
+    "developer",
+    "develop",
+    "debug",
+    "debugger",
+    "compiler",
+    "build",
+    "make",
+    "cmake",
+    "gradle",
     // Git/Version Control
-    "git", "github", "gitlab", "bitbucket", "sourcetree",
-    "tower", "fork", "gitkraken", "merge",
+    "git",
+    "github",
+    "gitlab",
+    "bitbucket",
+    "sourcetree",
+    "tower",
+    "fork",
+    "gitkraken",
+    "merge",
     // Database/API
-    "database", "sql", "postgres", "mysql", "mongo", "redis",
-    "api", "postman", "insomnia", "graphql", "rest",
-    "sequel", "tableplus", "dbeaver", "datagrip",
+    "database",
+    "sql",
+    "postgres",
+    "mysql",
+    "mongo",
+    "redis",
+    "api",
+    "postman",
+    "insomnia",
+    "graphql",
+    "rest",
+    "sequel",
+    "tableplus",
+    "dbeaver",
+    "datagrip",
     // DevOps/Infra
-    "docker", "kubernetes", "k8s", "podman", "container",
-    "terraform", "ansible", "jenkins", "ci", "deploy",
+    "docker",
+    "kubernetes",
+    "k8s",
+    "podman",
+    "container",
+    "terraform",
+    "ansible",
+    "jenkins",
+    "ci",
+    "deploy",
     // Languages (in bundle IDs)
-    "python", "rust", "golang", "nodejs", "ruby", "java",
+    "python",
+    "rust",
+    "golang",
+    "nodejs",
+    "ruby",
+    "java",
 ];
 
 /// Writing/Creative keywords → creative
 const CREATIVE_KEYWORDS: &[&str] = &[
     // Writing
-    "writer", "writing", "write", "document", "doc", "word",
-    "pages", "scrivener", "ulysses", "bear", "drafts", "byword",
-    "novel", "story", "blog", "article", "journal", "diary",
+    "writer",
+    "writing",
+    "write",
+    "document",
+    "doc",
+    "word",
+    "pages",
+    "scrivener",
+    "ulysses",
+    "bear",
+    "drafts",
+    "byword",
+    "novel",
+    "story",
+    "blog",
+    "article",
+    "journal",
+    "diary",
     // Design
-    "design", "designer", "figma", "sketch", "illustrator",
-    "photoshop", "affinity", "canva", "draw", "paint", "art",
-    "graphic", "layout", "prototype", "wireframe", "mockup",
+    "design",
+    "designer",
+    "figma",
+    "sketch",
+    "illustrator",
+    "photoshop",
+    "affinity",
+    "canva",
+    "draw",
+    "paint",
+    "art",
+    "graphic",
+    "layout",
+    "prototype",
+    "wireframe",
+    "mockup",
     // Video/Audio
-    "video", "movie", "film", "premiere", "finalcut", "davinci",
-    "audio", "sound", "music", "podcast", "recording",
-    "logic", "garageband", "audacity", "ableton", "pro tools",
+    "video",
+    "movie",
+    "film",
+    "premiere",
+    "finalcut",
+    "davinci",
+    "audio",
+    "sound",
+    "music",
+    "podcast",
+    "recording",
+    "logic",
+    "garageband",
+    "audacity",
+    "ableton",
+    "pro tools",
     // 3D/Animation
-    "3d", "blender", "cinema4d", "maya", "render", "animation",
+    "3d",
+    "blender",
+    "cinema4d",
+    "maya",
+    "render",
+    "animation",
 ];
 
 /// Infer style from app name and bundle ID keywords.
@@ -405,9 +530,9 @@ fn infer_style_from_category(app: &ActiveApp) -> Option<&'static str> {
 
     // Helper to check if any keyword matches
     let matches_any = |keywords: &[&str]| -> bool {
-        keywords.iter().any(|kw| {
-            name_lower.contains(kw) || bundle_lower.contains(kw)
-        })
+        keywords
+            .iter()
+            .any(|kw| name_lower.contains(kw) || bundle_lower.contains(kw))
     };
 
     // Check categories in order of specificity
@@ -504,7 +629,10 @@ mod tests {
             name: "FastMail Pro".to_string(),
         };
         let style = get_style_for_app(&app);
-        assert_eq!(style.id, "professional", "Mail app should be inferred as professional");
+        assert_eq!(
+            style.id, "professional",
+            "Mail app should be inferred as professional"
+        );
     }
 
     #[test]
@@ -514,7 +642,10 @@ mod tests {
             name: "Ultra Terminal".to_string(),
         };
         let style = get_style_for_app(&app);
-        assert_eq!(style.id, "technical", "Terminal app should be inferred as technical");
+        assert_eq!(
+            style.id, "technical",
+            "Terminal app should be inferred as technical"
+        );
     }
 
     #[test]
@@ -524,7 +655,10 @@ mod tests {
             name: "Super Code Editor".to_string(),
         };
         let style = get_style_for_app(&app);
-        assert_eq!(style.id, "technical", "Code editor should be inferred as technical");
+        assert_eq!(
+            style.id, "technical",
+            "Code editor should be inferred as technical"
+        );
     }
 
     #[test]
@@ -534,7 +668,10 @@ mod tests {
             name: "Amazing Designer Pro".to_string(),
         };
         let style = get_style_for_app(&app);
-        assert_eq!(style.id, "creative", "Design app should be inferred as creative");
+        assert_eq!(
+            style.id, "creative",
+            "Design app should be inferred as creative"
+        );
     }
 
     #[test]
@@ -544,7 +681,10 @@ mod tests {
             name: "Podcast Recording".to_string(),
         };
         let style = get_style_for_app(&app);
-        assert_eq!(style.id, "creative", "Podcast/music app should be inferred as creative");
+        assert_eq!(
+            style.id, "creative",
+            "Podcast/music app should be inferred as creative"
+        );
     }
 
     #[test]
@@ -554,7 +694,10 @@ mod tests {
             name: "Container Manager".to_string(), // Name doesn't have keywords
         };
         let style = get_style_for_app(&app);
-        assert_eq!(style.id, "technical", "Should infer from 'docker' in bundle ID");
+        assert_eq!(
+            style.id, "technical",
+            "Should infer from 'docker' in bundle ID"
+        );
     }
 
     // =========================================================================
@@ -568,7 +711,10 @@ mod tests {
             name: "Random App".to_string(),
         };
         let style = get_style_for_app(&app);
-        assert_eq!(style.id, "neutral", "Unknown app with no keywords should be neutral");
+        assert_eq!(
+            style.id, "neutral",
+            "Unknown app with no keywords should be neutral"
+        );
     }
 
     // =========================================================================

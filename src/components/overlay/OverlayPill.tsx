@@ -45,10 +45,9 @@ export function OverlayPill({
       onClick={handlePillClick}
       className={cn(
         "flex items-center gap-3 rounded-full px-5 py-3",
-        "bg-[rgba(30,30,30,0.95)] backdrop-blur-xl",
-        "border border-white/10 shadow-elevated",
-        "transition-colors duration-150",
-        canStop && "cursor-pointer hover:bg-[rgba(40,40,40,0.95)]",
+        "glass-pill",
+        "transition-all duration-150",
+        canStop && "cursor-pointer hover:scale-[1.02]",
         !canStop && "cursor-default"
       )}
       title={canStop ? "Click to stop and transcribe" : undefined}
@@ -70,9 +69,11 @@ export function OverlayPill({
         }}
         className={cn(
           "flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full",
-          "bg-white/10 text-white/60",
+          "bg-white/[0.08] text-white/60",
+          "border border-white/[0.08]",
           "transition-all duration-150",
-          "hover:bg-white/20 hover:text-white"
+          "hover:bg-white/[0.15] hover:text-white hover:border-white/[0.15]",
+          "active:scale-95"
         )}
         title="Cancel"
       >

@@ -1,0 +1,47 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+        exclude: tsconfig\.json
+      - id: check-toml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # Rust formatting (using Homebrew-installed Rust)
+  - repo: local
+    hooks:
+      - id: rustfmt
+        name: rustfmt
+        entry: /opt/homebrew/bin/rustfmt --edition 2021
+        language: system
+        types: [rust]
+        pass_filenames: true
+
+      # Note: clippy requires rustup to be configured.
+      # Run: rustup default stable
+      # Then uncomment the clippy hook below:
+      # - id: clippy
+      #   name: clippy
+      #   entry: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+      #   language: system
+      #   types: [rust]
+      #   pass_filenames: false
+
+  # TypeScript type checking
+  - repo: local
+    hooks:
+      - id: tsc
+        name: TypeScript type check
+        entry: npx tsc --noEmit
+        language: system
+        types: [ts, tsx]
+        pass_filenames: false

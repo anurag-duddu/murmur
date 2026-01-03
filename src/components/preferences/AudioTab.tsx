@@ -58,18 +58,18 @@ export function AudioTab({ preferences, onUpdate }: AudioTabProps) {
       <section className="space-y-5">
         <div className="flex items-center gap-2">
           <Mic className="h-4 w-4 text-accent" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Input Device</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-white/50">Input Device</h2>
         </div>
 
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 sm:p-5 space-y-4">
+        <div className="rounded-2xl glass-card p-4 sm:p-5 space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="microphone" className="text-sm font-medium">Microphone</Label>
+            <Label htmlFor="microphone" className="text-sm font-medium text-white">Microphone</Label>
             <Select
               value={preferences.microphone || "default"}
               onValueChange={(value) => onUpdate("microphone", value)}
               disabled={isLoading}
             >
-              <SelectTrigger id="microphone" className="w-full bg-white/[0.03] border-white/[0.08] hover:bg-white/[0.05] transition-colors">
+              <SelectTrigger id="microphone" className="w-full glass-input">
                 <SelectValue placeholder={isLoading ? "Loading..." : "Select microphone"} />
               </SelectTrigger>
               <SelectContent>
@@ -82,7 +82,7 @@ export function AudioTab({ preferences, onUpdate }: AudioTabProps) {
               </SelectContent>
             </Select>
             {selectedDevice && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 text-xs text-white/50">
                 <Check className="h-3 w-3 text-emerald-400" />
                 Using: {selectedDevice.name}
               </div>
@@ -95,20 +95,20 @@ export function AudioTab({ preferences, onUpdate }: AudioTabProps) {
       <section className="space-y-5">
         <div className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-accent" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Input Level</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-white/50">Input Level</h2>
         </div>
 
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 sm:p-5 space-y-4">
+        <div className="rounded-2xl glass-card p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Level Monitor</span>
-            <span className="rounded-md bg-white/[0.06] px-2 py-1 text-xs font-medium tabular-nums">
+            <span className="text-sm font-medium text-white">Level Monitor</span>
+            <span className="rounded-md bg-white/[0.08] border border-white/[0.1] px-2 py-1 text-xs font-medium tabular-nums text-white/80">
               {Math.round(audioLevel * 100)}%
             </span>
           </div>
 
           {/* Visual meter - more sophisticated design */}
           <div className="relative">
-            <div className="flex h-4 gap-[2px] overflow-hidden rounded-lg bg-white/[0.03]">
+            <div className="flex h-4 gap-[2px] overflow-hidden rounded-lg bg-white/[0.04] border border-white/[0.06]">
               {Array.from({ length: 24 }).map((_, i) => {
                 const threshold = (i + 1) / 24;
                 const isActive = audioLevel >= threshold;
@@ -133,15 +133,15 @@ export function AudioTab({ preferences, onUpdate }: AudioTabProps) {
               })}
             </div>
             {/* Level labels */}
-            <div className="flex justify-between mt-2 text-[10px] text-muted-foreground">
+            <div className="flex justify-between mt-2 text-[10px] text-white/40">
               <span>Quiet</span>
               <span>Optimal</span>
               <span>Loud</span>
             </div>
           </div>
 
-          <div className="rounded-lg bg-white/[0.03] p-3">
-            <p className="text-xs text-muted-foreground leading-relaxed">
+          <div className="rounded-lg bg-white/[0.04] border border-white/[0.06] p-3">
+            <p className="text-xs text-white/50 leading-relaxed">
               Speak to test your microphone. The meter should stay in the <span className="text-emerald-400 font-medium">green zone</span> while talking.
             </p>
           </div>
@@ -152,10 +152,10 @@ export function AudioTab({ preferences, onUpdate }: AudioTabProps) {
       <section className="space-y-5">
         <div className="flex items-center gap-2">
           <Lightbulb className="h-4 w-4 text-accent" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Tips</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-white/50">Tips</h2>
         </div>
 
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 sm:p-5">
+        <div className="rounded-2xl glass-card p-4 sm:p-5">
           <ul className="space-y-3">
             {[
               "Position your microphone 6-12 inches from your mouth",
@@ -163,8 +163,8 @@ export function AudioTab({ preferences, onUpdate }: AudioTabProps) {
               "Speak clearly at a consistent volume",
               "The level meter should stay in the green zone while speaking",
             ].map((tip, i) => (
-              <li key={i} className="flex items-start gap-3 text-sm text-muted-foreground">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[10px] font-semibold text-accent">
+              <li key={i} className="flex items-start gap-3 text-sm text-white/60">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/15 border border-accent/20 text-[10px] font-semibold text-accent">
                   {i + 1}
                 </span>
                 <span className="leading-relaxed">{tip}</span>

@@ -66,7 +66,6 @@ const PROGRAMMING_TERMS: &[(&str, &str)] = &[
     ("a w s", "AWS"),
     ("G C P", "GCP"),
     ("g c p", "GCP"),
-
     // Common mis-transcriptions
     ("jason", "JSON"),
     ("Jay son", "JSON"),
@@ -83,7 +82,6 @@ const PROGRAMMING_TERMS: &[(&str, &str)] = &[
     ("K 8 S", "k8s"),
     ("k 8 s", "k8s"),
     ("kates", "k8s"),
-
     // Frameworks and languages
     ("type script", "TypeScript"),
     ("java script", "JavaScript"),
@@ -101,7 +99,6 @@ const PROGRAMMING_TERMS: &[(&str, &str)] = &[
     ("tailwind css", "Tailwind CSS"),
     ("graph Q L", "GraphQL"),
     ("graph ql", "GraphQL"),
-
     // Common tools
     ("git hub", "GitHub"),
     ("git lab", "GitLab"),
@@ -113,7 +110,6 @@ const PROGRAMMING_TERMS: &[(&str, &str)] = &[
     ("pie charm", "PyCharm"),
     ("pycharm", "PyCharm"),
     ("web storm", "WebStorm"),
-
     // Common programming terms
     ("async", "async"),
     ("a sync", "async"),
@@ -141,7 +137,6 @@ const PROGRAMMING_TERMS: &[(&str, &str)] = &[
     ("hash set", "HashSet"),
     ("vector", "Vec"),
     ("vec", "Vec"),
-
     // Git commands
     ("git init", "git init"),
     ("git clone", "git clone"),
@@ -166,9 +161,7 @@ static DICTIONARY_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new
         .filter_map(|(pattern, replacement)| {
             // Create case-insensitive word-boundary regex
             let regex_pattern = format!(r"(?i)\b{}\b", regex::escape(pattern));
-            Regex::new(&regex_pattern)
-                .ok()
-                .map(|re| (re, *replacement))
+            Regex::new(&regex_pattern).ok().map(|re| (re, *replacement))
         })
         .collect()
 });

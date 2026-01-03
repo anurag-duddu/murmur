@@ -21,7 +21,7 @@ pub struct StoredPreferences {
 impl StoredPreferences {
     /// Get the app name for config directory.
     fn app_name() -> String {
-        "murmur".to_string()
+        "keyhold".to_string()
     }
 
     fn config_path() -> Option<PathBuf> {
@@ -54,8 +54,7 @@ impl StoredPreferences {
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
 
-        fs::write(&path, content)
-            .map_err(|e| format!("Failed to write preferences: {}", e))?;
+        fs::write(&path, content).map_err(|e| format!("Failed to write preferences: {}", e))?;
 
         println!("Saved preferences to {:?}", path);
         Ok(())
@@ -81,8 +80,18 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load() -> Self {
-        // Load .env file if it exists (for development)
+        // Load .env file from multiple locations:
+        // 1. Current directory (for development with `tauri dev`)
+        // 2. User's config directory (~/.config/keyhold/.env for release builds)
         dotenv().ok();
+
+        // Also try loading from config directory (for release builds)
+        if let Some(config_dir) = dirs::config_dir() {
+            let env_path = config_dir.join("keyhold").join(".env");
+            if env_path.exists() {
+                dotenv::from_path(&env_path).ok();
+            }
+        }
 
         // Load stored preferences from file
         let stored = StoredPreferences::load();
@@ -92,11 +101,9 @@ impl AppConfig {
 
         AppConfig {
             groq_api_key,
-            recording_mode: stored
-                .recording_mode
-                .unwrap_or_else(|| {
-                    env::var("DEFAULT_RECORDING_MODE").unwrap_or_else(|_| "push-to-talk".to_string())
-                }),
+            recording_mode: stored.recording_mode.unwrap_or_else(|| {
+                env::var("DEFAULT_RECORDING_MODE").unwrap_or_else(|_| "push-to-talk".to_string())
+            }),
             hotkey: stored.hotkey.unwrap_or_else(|| "Option+Space".to_string()),
             max_recording_duration: env::var("MAX_RECORDING_DURATION")
                 .unwrap_or_else(|_| "1800".to_string())

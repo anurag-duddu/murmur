@@ -40,11 +40,12 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
-  // Multi-page app configuration for overlay window
+  // Multi-page app configuration for multiple windows
   build: {
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
+        login: resolve(__dirname, "login.html"),
         overlay: resolve(__dirname, "overlay.html"),
         onboarding: resolve(__dirname, "onboarding.html"),
       },

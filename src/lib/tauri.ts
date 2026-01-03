@@ -10,6 +10,7 @@ import type {
   RecordingErrorEvent,
   AudioLevelEvent,
 } from "@/types";
+import type { AuthState, UserInfo } from "@/types/auth";
 
 // ============================================================================
 // TAURI COMMANDS
@@ -31,8 +32,8 @@ export const tauriCommands = {
 
   // Permissions
   checkPermissions: () => invoke<PermissionStatus>("check_permissions"),
-  getPermissionStatus: () => invoke<PermissionStatus>("check_permissions"),
   requestMicrophonePermission: () => invoke<boolean>("request_microphone_permission"),
+  requestAccessibilityPermission: () => invoke<boolean>("request_accessibility_permission"),
   openAccessibilitySettings: () => invoke<void>("open_accessibility_settings"),
   getMicrophones: () => invoke<MicrophoneDevice[]>("get_microphones"),
   setSelectedMicrophone: (deviceId: string) =>
@@ -40,10 +41,19 @@ export const tauriCommands = {
 
   // Onboarding
   isOnboardingComplete: () => invoke<boolean>("is_onboarding_complete"),
+  needsReauthorization: () => invoke<boolean>("needs_reauthorization"),
   completeOnboarding: () => invoke<void>("complete_onboarding"),
+  restartApp: () => invoke<void>("restart_app"),
 
   // Window
   showPreferences: () => invoke<void>("show_preferences"),
+
+  // Authentication
+  getAuthState: () => invoke<AuthState>("get_auth_state"),
+  startAuth: () => invoke<void>("start_auth"),
+  logout: () => invoke<void>("logout"),
+  getUserInfo: () => invoke<UserInfo | null>("get_user_info"),
+  isAuthenticated: () => invoke<boolean>("is_authenticated"),
 };
 
 // ============================================================================
@@ -71,15 +81,9 @@ export const tauriEvents = {
   onToggleRecording: (callback: () => void): Promise<UnlistenFn> =>
     listen("toggle-recording", () => callback()),
 
-  // Global shortcut events
-  onShortcutStart: (callback: () => void): Promise<UnlistenFn> =>
-    listen("shortcut-start", () => callback()),
-
-  onShortcutStop: (callback: () => void): Promise<UnlistenFn> =>
-    listen("shortcut-stop", () => callback()),
-
-  onShortcutToggle: (callback: () => void): Promise<UnlistenFn> =>
-    listen("shortcut-toggle", () => callback()),
+  // Authentication state changes
+  onAuthStateChanged: (callback: (state: AuthState) => void): Promise<UnlistenFn> =>
+    listen<AuthState>("auth-state-changed", (e) => callback(e.payload)),
 };
 
 // ============================================================================

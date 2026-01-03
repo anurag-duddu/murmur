@@ -14,16 +14,15 @@ use std::process::Command;
 /// Returns `None` if detection fails.
 pub fn get_active_app() -> Option<ActiveApp> {
     // Get the frontmost app's ASN (Application Serial Number)
-    let front_output = Command::new("lsappinfo")
-        .arg("front")
-        .output()
-        .ok()?;
+    let front_output = Command::new("lsappinfo").arg("front").output().ok()?;
 
     if !front_output.status.success() {
         return None;
     }
 
-    let asn = String::from_utf8_lossy(&front_output.stdout).trim().to_string();
+    let asn = String::from_utf8_lossy(&front_output.stdout)
+        .trim()
+        .to_string();
     if asn.is_empty() || asn == "-" {
         return None;
     }
@@ -101,7 +100,10 @@ mod tests {
     #[test]
     fn test_extract_lsappinfo_value() {
         assert_eq!(
-            extract_lsappinfo_value("\"CFBundleIdentifier\"=\"com.example.app\"", "CFBundleIdentifier"),
+            extract_lsappinfo_value(
+                "\"CFBundleIdentifier\"=\"com.example.app\"",
+                "CFBundleIdentifier"
+            ),
             Some("com.example.app".to_string())
         );
         assert_eq!(

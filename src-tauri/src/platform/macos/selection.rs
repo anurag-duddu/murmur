@@ -106,11 +106,13 @@ pub fn get_selected_text() -> Result<String, SelectionError> {
             // Check for common error patterns
             if error_msg.contains("accessibility")
                 || error_msg.contains("permission")
-                || error_msg.contains("not trusted") {
+                || error_msg.contains("not trusted")
+            {
                 Err(SelectionError::AccessibilityDenied)
             } else if error_msg.contains("no selection")
                 || error_msg.contains("empty")
-                || error_msg.contains("null") {
+                || error_msg.contains("null")
+            {
                 Err(SelectionError::NoSelection)
             } else {
                 Err(SelectionError::Failed(error_msg))
@@ -129,7 +131,10 @@ mod tests {
         assert_eq!(format!("{}", no_sel), "No text selected");
 
         let access_denied = SelectionError::AccessibilityDenied;
-        assert_eq!(format!("{}", access_denied), "Accessibility permission denied");
+        assert_eq!(
+            format!("{}", access_denied),
+            "Accessibility permission denied"
+        );
 
         let failed = SelectionError::Failed("test error".to_string());
         assert_eq!(format!("{}", failed), "Selection error: test error");

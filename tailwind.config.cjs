@@ -52,6 +52,14 @@ module.exports = {
         },
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))",
+        // Glass morphism colors
+        glass: {
+          light: "rgba(255, 255, 255, 0.08)",
+          medium: "rgba(255, 255, 255, 0.12)",
+          dark: "rgba(0, 0, 0, 0.4)",
+          border: "rgba(255, 255, 255, 0.15)",
+          "border-subtle": "rgba(255, 255, 255, 0.10)",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -79,6 +87,13 @@ module.exports = {
         card: "0 2px 8px rgba(0, 0, 0, 0.04)",
         elevated: "0 4px 16px rgba(0, 0, 0, 0.08)",
         glow: "0 0 20px rgba(0, 122, 255, 0.15)",
+        // Glass morphism shadows
+        glass: "0 8px 32px rgba(0, 0, 0, 0.12)",
+        "glass-lg": "0 12px 48px rgba(0, 0, 0, 0.15)",
+        "glass-inset": "inset 0 1px 1px rgba(255, 255, 255, 0.1)",
+        "glass-rim": "inset 0 1px 0 rgba(255, 255, 255, 0.08)",
+        "glass-glow": "0 0 40px rgba(255, 159, 38, 0.15)",
+        "glass-glow-accent": "0 0 60px rgba(255, 159, 38, 0.25)",
       },
       animation: {
         "pulse-recording": "pulse-recording 1.5s ease-in-out infinite",
@@ -111,6 +126,11 @@ module.exports = {
       },
       transitionTimingFunction: {
         spring: "cubic-bezier(0.16, 1, 0.3, 1)",
+      },
+      backdropBlur: {
+        glass: "20px",
+        "glass-strong": "40px",
+        "glass-subtle": "12px",
       },
     },
   },

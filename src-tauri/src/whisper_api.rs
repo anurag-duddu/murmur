@@ -68,7 +68,10 @@ impl WhisperApiClient {
         // Check rate limit before making API call
         check_rate_limit(Service::WhisperApi)?;
 
-        println!("Sending audio to Groq Whisper API ({} bytes)...", audio_wav.len());
+        println!(
+            "Sending audio to Groq Whisper API ({} bytes)...",
+            audio_wav.len()
+        );
 
         let (api_url, api_key) = self.get_api_config();
 
@@ -77,9 +80,11 @@ impl WhisperApiClient {
         let lang_code = language.split('-').next().unwrap_or(language);
 
         if is_mixed_mode {
-            self.transcribe_mixed_mode(audio_wav, &api_url, api_key.as_deref(), spoken_languages).await
+            self.transcribe_mixed_mode(audio_wav, &api_url, api_key.as_deref(), spoken_languages)
+                .await
         } else {
-            self.transcribe_native_mode(audio_wav, &api_url, api_key.as_deref(), lang_code).await
+            self.transcribe_native_mode(audio_wav, &api_url, api_key.as_deref(), lang_code)
+                .await
         }
     }
 
@@ -180,7 +185,8 @@ impl WhisperApiClient {
             .map_err(|e| format!("Failed to create file part: {}", e))?;
 
         // Build prompt listing user's spoken languages
-        let lang_names = spoken_languages.iter()
+        let lang_names = spoken_languages
+            .iter()
             .map(|code| language_code_to_name(code))
             .collect::<Vec<_>>()
             .join(", ");
@@ -253,9 +259,9 @@ impl WhisperApiClient {
 
         // Validate detected language is in user's spoken languages
         let detected_code = language_name_to_code(detected_lang);
-        let is_valid_lang = spoken_languages.iter().any(|l| {
-            l.split('-').next().unwrap_or(l) == detected_code
-        });
+        let is_valid_lang = spoken_languages
+            .iter()
+            .any(|l| l.split('-').next().unwrap_or(l) == detected_code);
 
         if !is_valid_lang && is_confident {
             println!(
@@ -315,7 +321,10 @@ static LANGUAGE_CODE_TO_NAME: OnceLock<HashMap<&'static str, &'static str>> = On
 static LANGUAGE_NAME_TO_CODE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
 
 /// Initialize language mappings (code -> name and lowercase name -> code)
-fn init_language_maps() -> (HashMap<&'static str, &'static str>, HashMap<&'static str, &'static str>) {
+fn init_language_maps() -> (
+    HashMap<&'static str, &'static str>,
+    HashMap<&'static str, &'static str>,
+) {
     let pairs: &[(&str, &str)] = &[
         ("en", "English"),
         ("hi", "Hindi"),

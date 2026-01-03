@@ -1,14 +1,19 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Murmur",
+  "productName": "Keyhold",
   "version": "0.1.0",
-  "identifier": "com.idstuart.murmur",
+  "identifier": "com.keyhold.app",
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM5MTgzQkI5QkZFMUVFNzAKUldSdzd1Ry91VHNZeWYvSXdZZU5VcC9rNWd1NmZIV1JUZVFVTFBQcTducHVwemZ3U0cwdUplWHgK",
       "endpoints": [
         "https://github.com/anurag-duddu/murmur/releases/latest/download/latest.json"
       ]
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["keyhold"]
+      }
     }
   },
   "build": {
@@ -22,13 +27,28 @@
     "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "login",
+        "title": "Keyhold - Sign In",
+        "url": "login.html",
+        "width": 420,
+        "height": 520,
+        "visible": false,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "resizable": false,
+        "center": true
+      },
+      {
         "label": "main",
-        "title": "Murmur - Preferences",
+        "title": "Keyhold - Preferences",
         "width": 400,
         "height": 500,
         "visible": false,
         "skipTaskbar": true,
         "decorations": true,
+        "transparent": false,
         "alwaysOnTop": false,
         "resizable": false,
         "center": true
@@ -50,7 +70,7 @@
       },
       {
         "label": "onboarding",
-        "title": "Murmur - Setup",
+        "title": "Keyhold - Setup",
         "url": "onboarding.html",
         "width": 560,
         "height": 640,
@@ -64,7 +84,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.anthropic.com https://api.deepgram.com https://api.groq.com https://api.lemonsqueezy.com https://huggingface.co https://*.huggingface.co; font-src 'self' data:"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.groq.com https://api.workos.com https://*.sentry.io https://*.ingest.us.sentry.io; font-src 'self' data:"
     }
   },
   "bundle": {

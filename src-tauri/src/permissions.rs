@@ -4,9 +4,75 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use std::process::Command;
 
+#[cfg(target_os = "macos")]
+mod macos_accessibility {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFRelease(cf: *const std::ffi::c_void);
+    }
+
+    // We need to construct the options dictionary to trigger the prompt
+    extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> bool;
+        fn CFDictionaryCreate(
+            allocator: *const std::ffi::c_void,
+            keys: *const *const std::ffi::c_void,
+            values: *const *const std::ffi::c_void,
+            num_values: isize,
+            key_callbacks: *const std::ffi::c_void,
+            value_callbacks: *const std::ffi::c_void,
+        ) -> *const std::ffi::c_void;
+        fn CFBooleanGetValue(boolean: *const std::ffi::c_void) -> bool;
+
+        // Constants
+        static kCFAllocatorDefault: *const std::ffi::c_void;
+        static kCFTypeDictionaryKeyCallBacks: std::ffi::c_void;
+        static kCFTypeDictionaryValueCallBacks: std::ffi::c_void;
+        static kCFBooleanTrue: *const std::ffi::c_void;
+        static kAXTrustedCheckOptionPrompt: *const std::ffi::c_void;
+    }
+
+    /// Check if the current process has accessibility permission
+    pub fn is_process_trusted() -> bool {
+        unsafe { AXIsProcessTrusted() }
+    }
+
+    /// Check accessibility permission and show system prompt if not granted
+    /// This triggers macOS to show a dialog directing user to System Settings
+    pub fn prompt_for_accessibility() -> bool {
+        unsafe {
+            // Create options dictionary with kAXTrustedCheckOptionPrompt = true
+            let keys = [kAXTrustedCheckOptionPrompt];
+            let values = [kCFBooleanTrue];
+
+            let options = CFDictionaryCreate(
+                kCFAllocatorDefault,
+                keys.as_ptr(),
+                values.as_ptr(),
+                1,
+                &kCFTypeDictionaryKeyCallBacks,
+                &kCFTypeDictionaryValueCallBacks,
+            );
+
+            let result = AXIsProcessTrustedWithOptions(options);
+
+            if !options.is_null() {
+                CFRelease(options);
+            }
+
+            result
+        }
+    }
+}
+
 /// Get the app name for config directory.
 fn app_name() -> String {
-    "murmur".to_string()
+    "keyhold".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,33 +89,47 @@ pub struct MicrophoneDevice {
 }
 
 /// Check if accessibility permission is granted
-/// This checks if we can use AppleScript to control System Events
+/// Uses AXIsProcessTrusted() - the definitive macOS API for this check
 pub fn check_accessibility_permission() -> bool {
     #[cfg(target_os = "macos")]
     {
-        // Try to run a simple AppleScript that requires accessibility
-        let result = Command::new("osascript")
-            .arg("-e")
-            .arg(r#"tell application "System Events" to return name of first process"#)
-            .output();
-
-        match result {
-            Ok(output) => {
-                if output.status.success() {
-                    return true;
-                }
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                // If we get a specific error about not being allowed, it's denied
-                !stderr.contains("not allowed") && !stderr.contains("assistive")
-            }
-            Err(_) => false,
-        }
+        let is_trusted = macos_accessibility::is_process_trusted();
+        log::debug!("AXIsProcessTrusted() returned: {}", is_trusted);
+        is_trusted
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         true // Non-macOS platforms don't need this check
     }
+}
+
+/// Request accessibility permission by showing the system prompt
+/// This triggers macOS to show a dialog directing user to System Settings
+/// Returns true if permission is already granted, false if user needs to grant it
+pub fn request_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let result = macos_accessibility::prompt_for_accessibility();
+        log::info!(
+            "AXIsProcessTrustedWithOptions(prompt=true) returned: {}",
+            result
+        );
+        result
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        true // Non-macOS platforms don't need this
+    }
+}
+
+/// Check if accessibility permission needs reauthorization
+/// This happens when the app was rebuilt with a different code signature
+pub fn needs_accessibility_reauth() -> bool {
+    // If onboarding was completed but accessibility doesn't work,
+    // user needs to reauthorize
+    is_onboarding_complete() && !check_accessibility_permission()
 }
 
 /// Check microphone permission status

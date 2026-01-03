@@ -3,6 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Murmur needs access to your microphone to transcribe your speech to text.</string>
+	<string>Keyhold needs access to your microphone to transcribe your speech to text.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.keyhold.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>keyhold</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

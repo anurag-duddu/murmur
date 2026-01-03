@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { PermissionCard } from "./PermissionCard";
 import { StepIndicator } from "./StepIndicator";
@@ -6,6 +6,7 @@ import { MicrophoneSelector } from "./MicrophoneSelector";
 import { SuccessScreen } from "./SuccessScreen";
 import { tauriCommands } from "@/lib/tauri";
 import { motion, AnimatePresence } from "framer-motion";
+import { listen } from "@tauri-apps/api/event";
 
 type PermissionStatus = "granted" | "denied" | "pending" | "checking";
 
@@ -16,33 +17,87 @@ export function OnboardingWindow() {
   const [selectedMic, setSelectedMic] = useState("default");
   const [isRequestingMic, setIsRequestingMic] = useState(false);
   const [hotkey, setHotkey] = useState("Option + Space");
+  const [isReauthorization, setIsReauthorization] = useState(false);
 
-  // Check permissions on mount
+  // Track if user has clicked "Open System Settings" for accessibility
+  const [isAwaitingAccessibility, setIsAwaitingAccessibility] = useState(false);
+  // Track time since waiting for accessibility (for restart button fallback)
+  const [accessibilityWaitTime, setAccessibilityWaitTime] = useState(0);
+
+  // Track if we've started checking permissions
+  const hasStartedRef = useRef(false);
+
+  // Check permissions ONLY when we receive the explicit "start-onboarding" event from backend
+  // This prevents permission dialogs from appearing before the user has logged in
   useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let unlistenEvent: (() => void) | null = null;
+
     const checkPermissions = async () => {
       try {
-        const status = await tauriCommands.getPermissionStatus();
-        setMicStatus(status.microphone ? "granted" : "pending");
-        setAccessibilityStatus(status.accessibility ? "granted" : "pending");
+        // Check if this is a re-authorization scenario (app rebuilt/reinstalled)
+        const needsReauth = await tauriCommands.needsReauthorization();
+        setIsReauthorization(needsReauth);
+
+        const status = await tauriCommands.checkPermissions();
+        // microphone is a string: "granted", "denied", or "undetermined"
+        setMicStatus(status.microphone === "granted" ? "granted" : "pending");
+        // accessibility is a boolean
+        setAccessibilityStatus(status.accessibility === true ? "granted" : "pending");
       } catch (err) {
         console.error("Failed to check permissions:", err);
         setMicStatus("pending");
         setAccessibilityStatus("pending");
       }
     };
-    checkPermissions();
 
-    // Poll for accessibility status (user must grant in System Settings)
-    const interval = setInterval(async () => {
-      try {
-        const status = await tauriCommands.getPermissionStatus();
-        setAccessibilityStatus(status.accessibility ? "granted" : "pending");
-      } catch (err) {
-        // Ignore polling errors
+    const startPolling = () => {
+      if (hasStartedRef.current) return;
+      hasStartedRef.current = true;
+
+      console.log("[Onboarding] Starting permission checks (triggered by backend event)");
+
+      // Initial check
+      checkPermissions();
+
+      // Poll for BOTH permissions (user may grant in System Settings)
+      interval = setInterval(async () => {
+        try {
+          const status = await tauriCommands.checkPermissions();
+          // Update both permissions - fixes asymmetry where only accessibility was polled
+          setMicStatus(status.microphone === "granted" ? "granted" : "pending");
+          setAccessibilityStatus(status.accessibility === true ? "granted" : "pending");
+        } catch (err) {
+          // Ignore polling errors
+        }
+      }, 1000);
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
       }
-    }, 1000);
+    };
 
-    return () => clearInterval(interval);
+    // ONLY listen for explicit "start-onboarding" event from backend
+    // This ensures permission checks only happen AFTER:
+    // 1. User has logged in
+    // 2. Backend has determined onboarding is needed
+    // 3. Backend has shown the onboarding window
+    const setup = async () => {
+      unlistenEvent = await listen("start-onboarding", () => {
+        console.log("[Onboarding] Received start-onboarding event from backend");
+        startPolling();
+      });
+    };
+
+    setup();
+
+    return () => {
+      stopPolling();
+      if (unlistenEvent) unlistenEvent();
+    };
   }, []);
 
   // Load hotkey from preferences
@@ -64,6 +119,25 @@ export function OnboardingWindow() {
     loadHotkey();
   }, []);
 
+  // Track how long we've been waiting for accessibility permission
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    if (isAwaitingAccessibility && accessibilityStatus !== "granted") {
+      timer = setInterval(() => {
+        setAccessibilityWaitTime((t) => t + 1);
+      }, 1000);
+    } else if (accessibilityStatus === "granted") {
+      // Reset when granted
+      setAccessibilityWaitTime(0);
+      setIsAwaitingAccessibility(false);
+    }
+
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isAwaitingAccessibility, accessibilityStatus]);
+
   // Request microphone permission
   const handleRequestMic = useCallback(async () => {
     setIsRequestingMic(true);
@@ -78,12 +152,45 @@ export function OnboardingWindow() {
     }
   }, []);
 
-  // Open accessibility settings
-  const handleOpenAccessibility = useCallback(async () => {
+  // Request accessibility permission (shows system dialog)
+  const handleRequestAccessibility = useCallback(async () => {
     try {
-      await tauriCommands.openAccessibilitySettings();
+      // This triggers macOS to show a dialog directing user to System Settings
+      const granted = await tauriCommands.requestAccessibilityPermission();
+      if (granted) {
+        setAccessibilityStatus("granted");
+      } else {
+        // Start waiting for user to grant in System Settings
+        setIsAwaitingAccessibility(true);
+        setAccessibilityWaitTime(0);
+      }
+      // If not granted, the system dialog will guide user to System Settings
+      // Permission status will be updated by the polling
     } catch (err) {
-      console.error("Failed to open accessibility settings:", err);
+      console.error("Failed to request accessibility:", err);
+      // Fallback to opening settings directly
+      setIsAwaitingAccessibility(true);
+      setAccessibilityWaitTime(0);
+      await tauriCommands.openAccessibilitySettings();
+    }
+  }, []);
+
+  // Force immediate re-check of accessibility permission
+  const handleCheckAccessibilityNow = useCallback(async () => {
+    try {
+      const status = await tauriCommands.checkPermissions();
+      setAccessibilityStatus(status.accessibility === true ? "granted" : "pending");
+    } catch (err) {
+      console.error("Failed to check accessibility:", err);
+    }
+  }, []);
+
+  // Restart the app (for edge cases where accessibility needs restart)
+  const handleRestartApp = useCallback(async () => {
+    try {
+      await tauriCommands.restartApp();
+    } catch (err) {
+      console.error("Failed to restart app:", err);
     }
   }, []);
 
@@ -112,12 +219,32 @@ export function OnboardingWindow() {
   const canContinue = micStatus === "granted" && accessibilityStatus === "granted";
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-[#1a1a2e] to-[#16213e] p-10">
-      <div className="w-full max-w-md">
+    <div className="flex min-h-screen flex-col items-center justify-center glass-window p-10 relative overflow-hidden">
+      {/* Ambient background glow */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-accent/10 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-blue-500/8 rounded-full blur-[80px] pointer-events-none" />
+
+      <div className="relative w-full max-w-md">
+        {/* Re-authorization banner */}
+        {isReauthorization && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 rounded-lg bg-amber-500/20 border border-amber-500/30 p-4"
+          >
+            <p className="text-sm text-amber-200">
+              <span className="font-medium">App was updated.</span>{" "}
+              Please re-grant Accessibility permission to enable text insertion.
+            </p>
+          </motion.div>
+        )}
+
         {/* Logo */}
         <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-white">Murmur</h1>
-          <p className="mt-2 text-white/60">Voice to text, effortlessly</p>
+          <h1 className="text-4xl font-bold text-white">Keyhold</h1>
+          <p className="mt-2 text-white/50">
+            {isReauthorization ? "Quick permission refresh" : "Voice to text, effortlessly"}
+          </p>
         </div>
 
         {/* Step Indicator */}
@@ -147,8 +274,30 @@ export function OnboardingWindow() {
               <PermissionCard
                 type="accessibility"
                 status={accessibilityStatus}
-                onRequest={handleOpenAccessibility}
+                onRequest={handleRequestAccessibility}
+                isAwaitingGrant={isAwaitingAccessibility}
+                onCheckNow={handleCheckAccessibilityNow}
               />
+
+              {/* Restart App button - shown after 30 seconds of waiting for accessibility */}
+              {isAwaitingAccessibility && accessibilityWaitTime >= 30 && accessibilityStatus !== "granted" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-4"
+                >
+                  <p className="text-sm text-amber-200 mb-3">
+                    Still waiting? Some systems require an app restart after granting accessibility.
+                  </p>
+                  <Button
+                    onClick={handleRestartApp}
+                    variant="outline"
+                    className="w-full bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 border-amber-500/30"
+                  >
+                    Restart Keyhold
+                  </Button>
+                </motion.div>
+              )}
 
               {/* Microphone Selector (shown when mic permission granted) */}
               {micStatus === "granted" && (

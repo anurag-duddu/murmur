@@ -99,17 +99,81 @@
 }
 
 @layer utilities {
-  /* Subtle glass effect for cards */
-  .glass {
-    @apply bg-card/80 backdrop-blur-xl;
-    border: 1px solid hsl(var(--border) / 0.5);
+  /* ===== GLASS MORPHISM SYSTEM ===== */
+
+  /* Primary glass panel - for major surfaces like headers, sidebars */
+  .glass-panel {
+    @apply bg-white/[0.08] border border-white/[0.15];
+    backdrop-filter: blur(20px) saturate(1.2);
+    -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.12),
+      inset 0 1px 1px rgba(255, 255, 255, 0.1);
   }
 
-  /* Recording pill dark glass */
+  /* Glass card - for content containers, sections */
+  .glass-card {
+    @apply bg-white/[0.06] border border-white/[0.12];
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  /* Glass card hover state */
+  .glass-card-interactive {
+    @apply glass-card transition-all duration-150;
+  }
+  .glass-card-interactive:hover {
+    @apply bg-white/[0.08] border-white/[0.15];
+  }
+
+  /* Glass input - for form elements */
+  .glass-input {
+    @apply bg-white/[0.04] border border-white/[0.10];
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: all 150ms ease;
+  }
+  .glass-input:hover {
+    @apply bg-white/[0.06] border-white/[0.15];
+  }
+  .glass-input:focus {
+    @apply bg-white/[0.08] border-accent/50;
+    box-shadow: 0 0 0 3px hsl(var(--accent) / 0.15);
+    outline: none;
+  }
+
+  /* Glass pill - for floating elements like overlay pill */
+  .glass-pill {
+    background: rgba(20, 20, 25, 0.80);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(24px) saturate(1.3);
+    -webkit-backdrop-filter: blur(24px) saturate(1.3);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.25),
+      inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  }
+  .glass-pill:hover {
+    background: rgba(30, 30, 35, 0.85);
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+
+  /* Glass window - solid background with subtle depth for main windows */
+  .glass-window {
+    background: linear-gradient(
+      180deg,
+      hsl(225 15% 10%) 0%,
+      hsl(225 15% 8%) 100%
+    );
+  }
+
+  /* Legacy glass classes (for backwards compat) */
+  .glass {
+    @apply glass-card;
+  }
+
   .glass-dark {
-    background: rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    @apply glass-pill;
   }
 
   /* Tabular numbers for timers */
@@ -131,27 +195,12 @@
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
   }
 
-  /* Gradient text */
-  .gradient-text {
-    @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(135deg, hsl(var(--accent)), hsl(38 100% 70%));
-  }
-
-  /* Glow effects */
-  .glow-accent {
-    box-shadow: 0 0 40px -8px hsl(var(--accent) / 0.35);
-  }
-
-  .glow-sm {
-    box-shadow: 0 0 20px -5px hsl(var(--accent) / 0.25);
-  }
 }
 
-/* Overlay window - transparent background */
-.overlay-window {
-  background: transparent !important;
-}
+/* ===== WINDOW BACKGROUNDS ===== */
 
+/* Overlay window - fully transparent for floating pill */
+.overlay-window,
 .overlay-window body {
   background: transparent !important;
 }
@@ -229,19 +278,6 @@
   }
 }
 
-/* Animation utilities */
-.animate-fade-in {
-  animation: fade-in 0.3s ease-out forwards;
-}
-
-.animate-slide-up {
-  animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animate-scale-in {
-  animation: scale-in 0.25s ease-out forwards;
-}
-
 /* Custom scrollbar - sleek dark style */
 ::-webkit-scrollbar {
   width: 8px;
@@ -259,19 +295,4 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(225 12% 25%);
-}
-
-/* Subtle background texture */
-.bg-texture {
-  position: relative;
-}
-
-.bg-texture::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-  opacity: 0.018;
-  pointer-events: none;
-  z-index: 0;
 }

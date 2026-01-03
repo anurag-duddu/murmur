@@ -35,14 +35,14 @@ export function MicrophoneSelector({ value, onChange }: MicrophoneSelectorProps)
   }, []);
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.08] p-6">
+    <div className="rounded-2xl glass-card p-6">
       <Label className="mb-4 flex items-center gap-2 text-base font-semibold text-white">
-        <Mic className="h-4 w-4" />
+        <Mic className="h-4 w-4 text-accent" />
         Select Microphone
       </Label>
 
       <Select value={value} onValueChange={onChange} disabled={isLoading}>
-        <SelectTrigger className="w-full border-white/20 bg-white/10 text-white">
+        <SelectTrigger className="w-full glass-input text-white">
           <SelectValue placeholder={isLoading ? "Loading..." : "Select microphone"} />
         </SelectTrigger>
         <SelectContent>

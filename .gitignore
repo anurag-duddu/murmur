@@ -34,6 +34,7 @@ dist-ssr
 # IDE/Tool specific (personal settings)
 .claude/
 .cursor/
+.sentryclirc
 
 # Internal documentation (PRDs, plans - not for public repo)
 docs/

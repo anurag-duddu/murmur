@@ -59,9 +59,15 @@ export function StickyActionBar({
       ref={barRef}
       className={cn(
         "sticky bottom-0 left-0 right-0",
-        "border-t border-white/[0.06] bg-gradient-to-t from-background via-background to-background/95 backdrop-blur-sm",
+        "border-t border-white/[0.12] bg-white/[0.06]",
+        "backdrop-blur-[20px]",
+        "shadow-[0_-8px_32px_rgba(0,0,0,0.15)]",
         !(hasChanges || saveSuccess) && "pointer-events-none opacity-0"
       )}
+      style={{
+        WebkitBackdropFilter: "blur(20px) saturate(1.2)",
+        backdropFilter: "blur(20px) saturate(1.2)",
+      }}
     >
       <div className="flex items-center justify-between px-4 sm:px-6 py-3">
         <div className="flex items-center gap-2">
@@ -87,7 +93,7 @@ export function StickyActionBar({
             variant="ghost"
             onClick={onCancel}
             disabled={isSaving || !hasChanges}
-            className="text-muted-foreground hover:text-foreground hover:bg-white/[0.06]"
+            className="text-white/60 hover:text-white hover:bg-white/[0.08] border-0"
           >
             Cancel
           </Button>

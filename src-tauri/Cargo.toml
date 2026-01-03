@@ -1,5 +1,5 @@
 [package]
-name = "murmur"
+name = "keyhold"
 version = "0.1.0"
 description = "Voice to text, effortlessly"
 authors = ["you"]
@@ -11,7 +11,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "murmur_lib"
+name = "keyhold_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -20,9 +20,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-opener = "2"
+tauri-plugin-deep-link = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-log = { version = "2", features = ["colored"] }
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "stream", "multipart", "native-tls"] }
@@ -45,14 +48,21 @@ hmac = "0.12"
 sha2 = "0.10"
 rand = "0.8"
 
+# Authentication - WorkOS OAuth
+url = "2.5"                 # URL parsing for OAuth callbacks
+urlencoding = "2.1"         # URL encoding for OAuth parameters
+
 # Command Mode - macOS Accessibility API
 get-selected-text = "0.1"  # Get selected text from any app via Accessibility API
 regex = "1"                # Pattern matching for selection validation
 
 # IDE Integrations (Phase 3)
-walkdir = "2"              # Recursive file walking for workspace indexing
-ignore = "0.4"             # Respects .gitignore when walking files
+ignore = "0.4"             # Respects .gitignore when walking files (includes WalkBuilder)
 fuzzy-matcher = "0.3"      # Fuzzy string matching for file tagging
+
+# Error monitoring
+sentry = "0.42"                    # Crash reporting and error tracking
+tauri-plugin-sentry = "0.5"        # Tauri integration for Sentry
 
 [dev-dependencies]
 tempfile = "3"             # Temporary directories for testing
@@ -60,4 +70,3 @@ tempfile = "3"             # Temporary directories for testing
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
-

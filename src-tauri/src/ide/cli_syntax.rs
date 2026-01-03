@@ -14,7 +14,6 @@ const CLI_PATTERNS: &[(&str, &str)] = &[
     ("dash dash", "--"),
     ("double dash", "--"),
     ("hyphen hyphen", "--"),
-
     // Single dash options (handled by DASH_LETTER_PATTERN for "dash [letter]")
     // Removed "dash " and "hyphen " with trailing spaces - they don't match with \b word boundaries
     // and are better handled by the specialized DASH_LETTER_PATTERN regex
@@ -29,7 +28,6 @@ const CLI_PATTERNS: &[(&str, &str)] = &[
     ("greater than greater than", ">>"),
     ("append", ">>"),
     ("redirect", ">"),
-
     // Special characters
     ("backtick", "`"),
     ("back tick", "`"),
@@ -47,18 +45,15 @@ const CLI_PATTERNS: &[(&str, &str)] = &[
     ("ampersand", "&"),
     ("semicolon", ";"),
     ("colon", ":"),
-
     // Paths and slashes - LONGER PATTERNS FIRST
     ("forward slash", "/"),
     ("backslash", "\\"),
     ("back slash", "\\"),
     ("slash", "/"),
-
     // Quotes
     ("double quote", "\""),
     ("single quote", "'"),
     ("quote", "\""),
-
     // Brackets
     ("open paren", "("),
     ("close paren", ")"),
@@ -70,7 +65,6 @@ const CLI_PATTERNS: &[(&str, &str)] = &[
     ("close curly", "}"),
     ("open angle", "<"),
     ("close angle", ">"),
-
     // Common CLI words
     ("sudo", "sudo"),
     ("npm run", "npm run"),
@@ -93,30 +87,25 @@ static CLI_REGEX_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(
             // Use \b at start and end to prevent partial word matches
             let escaped = regex::escape(pattern);
             let regex_pattern = format!(r"(?i)\b{}\b", escaped);
-            Regex::new(&regex_pattern)
-                .ok()
-                .map(|re| (re, *replacement))
+            Regex::new(&regex_pattern).ok().map(|re| (re, *replacement))
         })
         .collect()
 });
 
 /// Pattern for "dash [letter]" → "-[letter]"
 /// SAFETY: unwrap() is safe - compile-time constant regex validated during development.
-static DASH_LETTER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bdash\s+([a-z])\b").unwrap()
-});
+static DASH_LETTER_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bdash\s+([a-z])\b").unwrap());
 
 /// Pattern for "dash dash [word]" → "--[word]"
 /// SAFETY: unwrap() is safe - compile-time constant regex validated during development.
-static DASH_DASH_WORD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bdash\s+dash\s+(\w+)").unwrap()
-});
+static DASH_DASH_WORD_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bdash\s+dash\s+(\w+)").unwrap());
 
 /// Pattern for "double dash [word]" → "--[word]"
 /// SAFETY: unwrap() is safe - compile-time constant regex validated during development.
-static DOUBLE_DASH_WORD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bdouble\s+dash\s+(\w+)").unwrap()
-});
+static DOUBLE_DASH_WORD_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bdouble\s+dash\s+(\w+)").unwrap());
 
 /// Apply CLI syntax patterns to text.
 ///
@@ -141,9 +130,7 @@ pub fn apply_cli_patterns(text: &str) -> String {
         .to_string();
 
     // Apply "dash [letter]" → "-[letter]"
-    result = DASH_LETTER_PATTERN
-        .replace_all(&result, "-$1")
-        .to_string();
+    result = DASH_LETTER_PATTERN.replace_all(&result, "-$1").to_string();
 
     // Apply static patterns
     for (regex, replacement) in CLI_REGEX_PATTERNS.iter() {
@@ -166,12 +153,18 @@ mod tests {
     #[test]
     fn test_double_dash_word() {
         assert_eq!(apply_cli_patterns("npm dash dash version"), "npm --version");
-        assert_eq!(apply_cli_patterns("cargo dash dash release"), "cargo --release");
+        assert_eq!(
+            apply_cli_patterns("cargo dash dash release"),
+            "cargo --release"
+        );
     }
 
     #[test]
     fn test_double_dash_word_alt() {
-        assert_eq!(apply_cli_patterns("npm double dash version"), "npm --version");
+        assert_eq!(
+            apply_cli_patterns("npm double dash version"),
+            "npm --version"
+        );
     }
 
     #[test]
@@ -181,17 +174,26 @@ mod tests {
 
     #[test]
     fn test_and_and() {
-        assert_eq!(apply_cli_patterns("mkdir foo and and cd foo"), "mkdir foo && cd foo");
+        assert_eq!(
+            apply_cli_patterns("mkdir foo and and cd foo"),
+            "mkdir foo && cd foo"
+        );
     }
 
     #[test]
     fn test_redirect() {
-        assert_eq!(apply_cli_patterns("echo hello greater than file.txt"), "echo hello > file.txt");
+        assert_eq!(
+            apply_cli_patterns("echo hello greater than file.txt"),
+            "echo hello > file.txt"
+        );
     }
 
     #[test]
     fn test_append() {
-        assert_eq!(apply_cli_patterns("echo hello append file.txt"), "echo hello >> file.txt");
+        assert_eq!(
+            apply_cli_patterns("echo hello append file.txt"),
+            "echo hello >> file.txt"
+        );
     }
 
     #[test]
@@ -201,12 +203,18 @@ mod tests {
 
     #[test]
     fn test_backtick() {
-        assert_eq!(apply_cli_patterns("run backtick command backtick"), "run ` command `");
+        assert_eq!(
+            apply_cli_patterns("run backtick command backtick"),
+            "run ` command `"
+        );
     }
 
     #[test]
     fn test_slashes() {
-        assert_eq!(apply_cli_patterns("path forward slash to forward slash file"), "path / to / file");
+        assert_eq!(
+            apply_cli_patterns("path forward slash to forward slash file"),
+            "path / to / file"
+        );
         assert_eq!(apply_cli_patterns("backslash n"), "\\ n");
     }
 
@@ -219,7 +227,10 @@ mod tests {
     #[test]
     fn test_npm_commands() {
         assert_eq!(apply_cli_patterns("npm run dev"), "npm run dev");
-        assert_eq!(apply_cli_patterns("npm install lodash"), "npm install lodash");
+        assert_eq!(
+            apply_cli_patterns("npm install lodash"),
+            "npm install lodash"
+        );
     }
 
     #[test]

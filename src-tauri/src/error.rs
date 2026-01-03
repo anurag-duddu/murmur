@@ -19,10 +19,7 @@ pub enum AppError {
     NoAudioCaptured,
 
     /// Transcription service failed
-    TranscriptionFailed {
-        provider: String,
-        message: String,
-    },
+    TranscriptionFailed { provider: String, message: String },
 
     /// Text enhancement/transformation failed
     EnhancementFailed {
@@ -87,7 +84,10 @@ impl AppError {
                 "Configuration error. Please check your settings.".to_string()
             }
             AppError::PermissionDenied(perm) => {
-                format!("{} permission required. Please grant access in System Settings.", perm)
+                format!(
+                    "{} permission required. Please grant access in System Settings.",
+                    perm
+                )
             }
             AppError::NetworkError(_) => {
                 "Network error. Please check your internet connection.".to_string()
@@ -101,9 +101,7 @@ impl AppError {
             AppError::ModelNotAvailable(_) => {
                 "Whisper model not available. Please download the model first.".to_string()
             }
-            AppError::InvalidState(_) => {
-                "Invalid operation. Please try again.".to_string()
-            }
+            AppError::InvalidState(_) => "Invalid operation. Please try again.".to_string(),
             AppError::ValidationError(msg) => {
                 format!("Invalid input: {}", msg)
             }

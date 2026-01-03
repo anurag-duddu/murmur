@@ -33,7 +33,8 @@ pub fn casual() -> Style {
 - Skip the trailing period on single sentences
 - Keep contractions as-is
 - DO NOT rewrite sentences or change the meaning
-- Only fix obvious errors, remove filler words, handle corrections"#.to_string(),
+- Only fix obvious errors, remove filler words, handle corrections"#
+            .to_string(),
         auto_features: AutoFeatures {
             lowercase_start: true,
             allow_contractions: true,
@@ -54,7 +55,8 @@ pub fn professional() -> Style {
 - Include all punctuation (periods, commas)
 - Keep contractions (modern business writing)
 - DO NOT rewrite sentences or change the meaning
-- Only fix obvious errors, remove filler words, handle corrections"#.to_string(),
+- Only fix obvious errors, remove filler words, handle corrections"#
+            .to_string(),
         auto_features: AutoFeatures {
             lowercase_start: false,
             allow_contractions: true,
@@ -73,7 +75,8 @@ pub fn neutral() -> Style {
 - Standard capitalization and punctuation
 - Preserve the speaker's exact wording
 - DO NOT rewrite sentences or change the meaning
-- Only fix obvious errors, remove filler words, handle corrections"#.to_string(),
+- Only fix obvious errors, remove filler words, handle corrections"#
+            .to_string(),
         auto_features: AutoFeatures {
             lowercase_start: false,
             allow_contractions: true,
@@ -94,7 +97,8 @@ pub fn technical() -> Style {
 - Preserve casing styles: camelCase, snake_case, kebab-case, PascalCase
 - Don't "correct" technical terms that look like typos
 - DO NOT rewrite sentences or change the meaning
-- Only fix obvious errors, remove filler words, handle corrections"#.to_string(),
+- Only fix obvious errors, remove filler words, handle corrections"#
+            .to_string(),
         auto_features: AutoFeatures {
             lowercase_start: false,
             allow_contractions: true,
@@ -115,7 +119,8 @@ pub fn creative() -> Style {
 - Preserve the speaker's natural voice and word choices
 - Allow varied sentence lengths
 - DO NOT rewrite sentences or change the meaning
-- Only fix obvious errors, remove filler words, handle corrections"#.to_string(),
+- Only fix obvious errors, remove filler words, handle corrections"#
+            .to_string(),
         auto_features: AutoFeatures {
             lowercase_start: false,
             allow_contractions: true,

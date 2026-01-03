@@ -182,12 +182,30 @@ mod tests {
 
     #[test]
     fn test_recording_state_serialization() {
-        assert_eq!(serde_json::to_string(&RecordingState::Idle).unwrap(), "\"idle\"");
-        assert_eq!(serde_json::to_string(&RecordingState::Recording).unwrap(), "\"recording\"");
-        assert_eq!(serde_json::to_string(&RecordingState::Transcribing).unwrap(), "\"transcribing\"");
-        assert_eq!(serde_json::to_string(&RecordingState::Enhancing).unwrap(), "\"enhancing\"");
-        assert_eq!(serde_json::to_string(&RecordingState::Transforming).unwrap(), "\"transforming\"");
-        assert_eq!(serde_json::to_string(&RecordingState::Error).unwrap(), "\"error\"");
+        assert_eq!(
+            serde_json::to_string(&RecordingState::Idle).unwrap(),
+            "\"idle\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RecordingState::Recording).unwrap(),
+            "\"recording\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RecordingState::Transcribing).unwrap(),
+            "\"transcribing\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RecordingState::Enhancing).unwrap(),
+            "\"enhancing\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RecordingState::Transforming).unwrap(),
+            "\"transforming\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RecordingState::Error).unwrap(),
+            "\"error\""
+        );
     }
 
     #[test]

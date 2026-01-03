@@ -1,7 +1,9 @@
-//! Secure token storage using file-based storage.
+//! File-based token storage.
 //!
-//! Tokens are stored in a file in the app's data directory.
-//! This approach doesn't require user permission prompts like system keychain does.
+//! Tokens are stored in a JSON file in the app's data directory with restrictive
+//! permissions (0600). This approach avoids the permission prompts that system
+//! keychain access requires, but is inherently less secure than hardware-backed
+//! storage. The file is protected by filesystem permissions only.
 
 use std::fs;
 use std::path::PathBuf;
@@ -67,7 +69,13 @@ fn write_auth_data(data: &AuthData) -> Result<(), AuthError> {
     {
         use std::os::unix::fs::PermissionsExt;
         let permissions = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(&path, permissions).ok();
+        fs::set_permissions(&path, permissions).map_err(|e| {
+            AuthError::StorageError(format!(
+                "Failed to set secure file permissions (0600) on {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
     }
 
     Ok(())
@@ -112,18 +120,18 @@ pub fn store_user_info(user: &UserInfo) -> Result<(), AuthError> {
 /// Retrieve user info.
 pub fn get_user_info() -> Result<Option<UserInfo>, AuthError> {
     let path = get_auth_file_path()?;
-    log::info!("[STORAGE] get_user_info reading from: {:?}", path);
-    log::info!("[STORAGE] File exists: {}", path.exists());
+    log::debug!("[STORAGE] get_user_info reading from: {:?}", path);
+    log::debug!("[STORAGE] File exists: {}", path.exists());
 
     let data = read_auth_data()?;
 
     match &data.user {
         Some(user) => {
-            log::info!("[STORAGE] Retrieved user info: {}", user.email);
+            log::debug!("[STORAGE] Retrieved user info for user_id: {}", user.id);
         }
         None => {
-            log::info!("[STORAGE] No user info found in auth data");
-            log::info!("[STORAGE] Tokens present: {}", data.tokens.is_some());
+            log::debug!("[STORAGE] No user info found in auth data");
+            log::debug!("[STORAGE] Tokens present: {}", data.tokens.is_some());
         }
     }
 

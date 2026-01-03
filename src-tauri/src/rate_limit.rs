@@ -243,13 +243,29 @@ mod tests {
     #[test]
     fn test_rate_limit_window_exceeded() {
         let limiter = RateLimiter::new();
-
-        // Use Groq for testing
         let service = Service::Groq;
+        let config = service.config();
 
-        // First request should succeed
+        // Fill up the quota by making max_requests with proper intervals
+        for i in 0..config.max_requests {
+            if i > 0 {
+                // Wait for min_interval between requests
+                thread::sleep(config.min_interval);
+            }
+            let result = limiter.check(service);
+            assert!(result.is_ok(), "Request {} should succeed", i);
+        }
+
+        // Wait for min_interval so we don't get TooFast error
+        thread::sleep(config.min_interval);
+
+        // Next request should hit the window limit
         let result = limiter.check(service);
-        assert!(result.is_ok());
+        assert!(
+            matches!(result, Err(RateLimitError::WindowExceeded { .. })),
+            "Expected WindowExceeded error, got {:?}",
+            result
+        );
     }
 
     #[test]
